@@ -775,3 +775,96 @@ def upload_to_youtube(video_path: Path, title: str, description: str, tags: List
         video_id = response['id']
 
         print(f"✓ Video uploaded to YouTube: https://www.youtube.com/watch?v={video_id}")
+        return video_id
+
+    except HttpError as e:
+        print(f"YouTube API error: {e.reason}")
+        print("Check your credentials and try again.")
+        sys.exit(1)
+
+    except Exception as e:
+        print(f"Error uploading to YouTube: {e}")
+        sys.exit(1)
+
+
+async def main():
+    """Main function to run the horror quote video generator"""
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Horror Movie Quote Video Generator')
+    parser.add_argument('--quotes', type=int, default=9, help='Number of quotes to use (default: 9)')
+    parser.add_argument('--duration', type=int, default=10, help='Duration per quote in seconds (default: 10)')
+    parser.add_argument('--upload', action='store_true', help='Upload to YouTube when done')
+    parser.add_argument('--custom-audio', action='store_true', help='Use custom audio from the audio directory', default=True)
+    parser.add_argument('--audio-file', type=str, help='Specific audio file to use (place in audio directory)')
+    args = parser.parse_args()
+
+    print("=" * 60)
+    print(" HORROR MOVIE QUOTE VIDEO GENERATOR ")
+    print("=" * 60)
+
+    # Setup directories
+    setup_directories()
+
+    # Generate quotes
+    quotes = get_horror_movie_quotes(args.quotes)
+
+    # Generate background images
+    background_paths = []
+    for i, quote in enumerate(quotes):
+        background_path = generate_background_image(quote, i)
+        print(f"Generated background at: {background_path}, exists: {os.path.exists(background_path)}")
+        background_paths.append(background_path)
+
+    # Create frames with text using the background images
+    frame_paths = create_frames_with_text(background_paths, quotes)
+
+    # Check for custom audio
+    music_path = None
+    if args.audio_file:
+        # Use specific audio file if provided
+        specific_file = AUDIO_DIR / args.audio_file
+        if os.path.exists(specific_file):
+            music_path = specific_file
+            print(f"Using specified audio file: {music_path}")
+        else:
+            print(f"Specified audio file not found: {args.audio_file}")
+            print(f"Please place the file in the {AUDIO_DIR} directory.")
+    elif args.custom_audio:
+        # Use any available custom audio
+        music_path = get_custom_audio()
+        if not music_path:
+            print("No custom audio files found. Please add MP3, WAV, or M4A files to the audio directory.")
+
+    # Generate timestamp for unique filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_path = OUTPUT_DIR / f"horror_quotes_{timestamp}.mp4"
+
+    # Create video
+    video_path = create_video(
+        frame_paths,
+        output_path,
+        music_path,
+        duration_per_frame=args.duration
+    )
+
+    # Optional: Upload to YouTube
+    if args.upload:
+        try:
+            upload_to_youtube(
+                video_path,
+                'Haunting Horror Movie Quotes',
+                'A collection of the most spine-chilling quotes from classic horror films',
+                ['horror', 'movie quotes', 'scary', 'horror films', 'shorts']
+            )
+        except Exception as e:
+            print(f"YouTube upload failed: {e}")
+            print(f"Your video is still available locally at: {video_path}")
+
+    print("=" * 60)
+    print("✓ Process completed successfully!")
+    print(f"✓ Video saved to: {video_path}")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
