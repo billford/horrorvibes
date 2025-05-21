@@ -1,0 +1,25 @@
+# Horror Movie Quote Video Generator - Requirements
+# Install with: pip install -r requirements.txt
+
+# OpenAI API client for generating horror movie quotes
+openai>=1.0.0
+
+# Image processing library for creating backgrounds and text overlays
+Pillow>=9.0.0
+
+# Environment variable management for API keys
+python-dotenv>=0.19.0
+
+# Google authentication libraries for YouTube upload functionality
+google-auth>=2.0.0
+google-auth-oauthlib>=0.5.0
+google-auth-httplib2>=0.1.0
+
+# Google API client for YouTube Data API
+google-api-python-client>=2.0.0
+
+# Progress bar library for better user experience
+tqdm>=4.64.0
+
+# Note: FFmpeg is also required but must be installed separately
+# See INSTALL.md for FFmpeg installation instructions
