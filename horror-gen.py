@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# Optional:#!/usr/bin/env python3
 """
 Horror Movie Quote Video Generator
 A Python application to create YouTube Shorts from horror movie quotes
@@ -6,19 +6,16 @@ A Python application to create YouTube Shorts from horror movie quotes
 
 import os
 import sys
-import time
 import json
 import random
 import argparse
-import requests
 import asyncio
 import tempfile
 import subprocess
 import re
 import shutil
-from io import BytesIO
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Optional
 from datetime import datetime
 
 # Required external libraries
@@ -31,7 +28,6 @@ from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
-from tqdm import tqdm
 
 # Load environment variables
 load_dotenv()
@@ -54,12 +50,12 @@ def setup_directories() -> None:
     """Create necessary project directories and clean up quotes from previous runs"""
     for directory in [QUOTES_DIR, IMAGES_DIR, FRAMES_DIR, OUTPUT_DIR, AUDIO_DIR]:
         directory.mkdir(exist_ok=True, parents=True)
-    
+
     # Clean up old quote files to ensure fresh quotes each run
     for quote_file in QUOTES_DIR.glob("quote_*.txt"):
         quote_file.unlink()
         print(f"Removed old quote file: {quote_file}")
-    
+
     print("✓ Project directories created and cleaned")
 
 def get_horror_movie_quotes(count: int = 9) -> List[str]:
@@ -103,9 +99,11 @@ def get_horror_movie_quotes(count: int = 9) -> List[str]:
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
         
         # Create a more specific prompt for variety
-        themes = ["classic horror", "modern horror", "psychological horror", "slasher films", "supernatural horror", "zombie films", "vampire movies", "ghost stories"]
+        themes = ["classic horror", "modern horror", "psychological horror",
+                  "slasher films", "supernatural horror", "zombie films",
+                  "vampire movies", "ghost stories"]
         selected_theme = random.choice(themes)
-        
+
         try:
             client = openai.OpenAI(api_key=openai_api_key)
             response = client.chat.completions.create(
@@ -113,11 +111,22 @@ def get_horror_movie_quotes(count: int = 9) -> List[str]:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a film historian specializing in horror movies. Provide authentic, memorable quotes from horror films. Include only the quote and the movie title. Format as: 'QUOTE' - MOVIE TITLE (YEAR). Ensure each quote is unique and different from any you've provided before."
+                        "content": ("You are a film historian specializing in horror movies. "
+                                    "Provide authentic, memorable quotes from horror films. "
+                                    "Include only the quote and the movie title. "
+                                    "Format as: 'QUOTE' - MOVIE TITLE (YEAR). "
+                                    "Ensure each quote is unique and different from any "
+                                    "you've provided before.")
                     },
                     {
                         "role": "user",
-                        "content": f"Provide {count - len(all_new_quotes)} different, authentic horror movie quotes focusing on {selected_theme}. Choose quotes that are impactful, memorable, and would look good on a dramatic background. Random seed: {random_seed}, timestamp: {timestamp}. Make sure these are completely different from typical horror quotes and avoid common, overused lines."
+                        "content": (f"Provide {count - len(all_new_quotes)} different, "
+                                    f"authentic horror movie quotes focusing on {selected_theme}. "
+                                    f"Choose quotes that are impactful, memorable, and would "
+                                    f"look good on a dramatic background. Random seed: {random_seed}, "
+                                    f"timestamp: {timestamp}. Make sure these are completely "
+                                    f"different from typical horror quotes and avoid common, "
+                                    f"overused lines.")
                     }
                 ],
                 temperature=1.0,
@@ -127,15 +136,15 @@ def get_horror_movie_quotes(count: int = 9) -> List[str]:
             # Extract quotes from response
             content = response.choices[0].message.content
             quote_lines = [line.strip() for line in content.split('\n') if line.strip()]
-            
+
             # Check each quote for uniqueness
             for quote in quote_lines:
                 if len(all_new_quotes) >= count:
                     break
-                    
+
                 # Normalize for comparison
                 normalized = quote.lower().replace('"', '').replace("'", "").strip()
-                
+
                 # Check if this quote is unique
                 if normalized not in used_quotes:
                     all_new_quotes.append(quote)
@@ -150,39 +159,39 @@ def get_horror_movie_quotes(count: int = 9) -> List[str]:
     
     if len(all_new_quotes) < count:
         print(f"Warning: Only got {len(all_new_quotes)} unique quotes out of {count} requested")
-    
+
     # Store quotes to files
     for i, quote in enumerate(all_new_quotes):
         with open(QUOTES_DIR / f"quote_{i + 1}.txt", "w", encoding='utf-8') as f:
             f.write(quote)
-    
+
     # Add new quotes to history file (avoiding duplicates)
     if all_new_quotes:
         with open(history_file, 'a', encoding='utf-8') as f:
             for quote in all_new_quotes:
                 f.write(f"{quote}\n")
-    
+
     print(f"✓ Generated {len(all_new_quotes)} unique horror movie quotes")
     return all_new_quotes
 
 def generate_background_image(quote: str, index: int) -> Path:
     """
     Generate a creepy background image for a quote
-    
+
     Args:
         quote: The horror movie quote
         index: Quote index for filename
-        
+
     Returns:
         Path to the generated image
     """
     print(f"GENERATING BACKGROUND for quote {index + 1}...")
-    print(f"THIS FUNCTION IS DEFINITELY RUNNING NOW")
-    
+    print("THIS FUNCTION IS DEFINITELY RUNNING NOW")
+
     try:
         # Create a dark gradient background
         image_path = IMAGES_DIR / f"background_{index + 1}.png"
-        
+
         # Create gradient from one dark color to another
         # Use a different color combination for each image to add variety
         color_pairs = [
@@ -196,56 +205,56 @@ def generate_background_image(quote: str, index: int) -> Path:
             ((100, 0, 100), (40, 0, 40)),  # Dark magenta gradient (brighter)
             ((100, 50, 0), (40, 20, 0))    # Dark orange gradient (brighter)
         ]
-        
+
         # Select a color pair based on the index, cycling through options
         color1, color2 = color_pairs[index % len(color_pairs)]
         print(f"Using color gradient: {color1} to {color2}")
-        
+
         # Create a new image with the 9:16 aspect ratio
         img = Image.new('RGB', (WIDTH, HEIGHT), color=color1)
         draw = ImageDraw.Draw(img)
-        
-        print(f"Drawing gradient...")
+
+        print("Drawing gradient...")
         # Draw the gradient background
         for y in range(HEIGHT):
             # Calculate color for this row
             r = int(color1[0] + (color2[0] - color1[0]) * y / HEIGHT)
             g = int(color1[1] + (color2[1] - color1[1]) * y / HEIGHT)
             b = int(color1[2] + (color2[2] - color1[2]) * y / HEIGHT)
-            
+
             # Draw a line with this color
             draw.line([(0, y), (WIDTH, y)], fill=(r, g, b))
-        
+
         # Save the background image (before adding texture to ensure it works)
         img.save(image_path)
         print(f"Saved basic gradient to {image_path}")
-        
+
         # Add some random dark texture elements for a creepy effect
         try:
-            print(f"Adding texture elements...")
+            print("Adding texture elements...")
             texture_img = img.copy().convert('RGBA')
             texture_draw = ImageDraw.Draw(texture_img)
-            
+
             for _ in range(100):  # Reduced number for speed
                 x = random.randint(0, WIDTH)
                 y = random.randint(0, HEIGHT)
                 size = random.randint(5, 100)
-                
+
                 # Draw directly on the image without using a separate shape
                 texture_draw.ellipse(
-                    (x - size, y - size, x + size, y + size), 
+                    (x - size, y - size, x + size, y + size),
                     fill=(0, 0, 0, random.randint(0, 50))
                 )
-            
+
             # Convert back to RGB and save
             final_img = texture_img.convert('RGB')
             final_img.save(image_path)
             print(f"Saved textured gradient to {image_path}")
-            
+
         except Exception as texture_error:
             print(f"Error adding texture: {texture_error}, using basic gradient")
             # The basic gradient was already saved, so we'll use that
-        
+
         print(f"✓ Created background image {index + 1} at {image_path}")
         # Verify it exists
         if os.path.exists(image_path):
@@ -257,15 +266,15 @@ def generate_background_image(quote: str, index: int) -> Path:
                 print("WARNING: Background file is suspiciously small!")
         else:
             print(f"WARNING: Background image file not found after saving: {image_path}")
-        
+
         return image_path
-        
+
     except Exception as e:
         print(f"Error generating background image: {e}")
         # Return a simple black background if something goes wrong
         image_path = IMAGES_DIR / f"background_{index + 1}.png"
         Image.new("RGB", (WIDTH, HEIGHT), color="black").save(image_path)
-        print(f"  Created black placeholder image instead")
+        print("  Created black placeholder image instead")
         return image_path
 
 def create_frames_with_text(background_paths: List[Path], quotes: List[str]) -> List[Path]:
@@ -476,7 +485,8 @@ def create_video(frame_paths: List[Path], output_path: Path, music_path: Optiona
             # Try to check if it's a valid audio file
             try:
                 audio_check_cmd = ['ffprobe', '-v', 'error', '-i', abs_music_path]
-                check_result = subprocess.run(audio_check_cmd, capture_output=True, text=True)
+                check_result = subprocess.run(audio_check_cmd, capture_output=True,
+                                              text=True, check=False)
                 if check_result.returncode == 0:
                     print("Audio file validation successful!")
                     has_valid_audio = True
@@ -519,8 +529,8 @@ def create_video(frame_paths: List[Path], output_path: Path, music_path: Optiona
         ]
         
         print(f"Running command: {' '.join(silent_cmd)}")
-        
-        silent_result = subprocess.run(silent_cmd, capture_output=True, text=True)
+
+        silent_result = subprocess.run(silent_cmd, capture_output=True, text=True, check=False)
         if silent_result.returncode != 0:
             print(f"Error creating silent video: {silent_result.stderr}")
             raise Exception("Failed to create silent video")
@@ -550,8 +560,8 @@ def create_video(frame_paths: List[Path], output_path: Path, music_path: Optiona
             ]
             
             print(f"Running command: {' '.join(audio_cmd)}")
-            
-            audio_result = subprocess.run(audio_cmd, capture_output=True, text=True)
+
+            audio_result = subprocess.run(audio_cmd, capture_output=True, text=True, check=False)
             if audio_result.returncode != 0:
                 print(f"Error adding audio: {audio_result.stderr}")
                 # If audio fails, just use the silent video
@@ -559,7 +569,7 @@ def create_video(frame_paths: List[Path], output_path: Path, music_path: Optiona
                 final_video_path = silent_video_path
             else:
                 print("Audio added successfully!")
-                
+
                 # Verify the output video has audio
                 try:
                     verify_cmd = [
@@ -570,7 +580,8 @@ def create_video(frame_paths: List[Path], output_path: Path, music_path: Optiona
                         '-of', 'csv=p=0',
                         final_video_path
                     ]
-                    verify_result = subprocess.run(verify_cmd, capture_output=True, text=True)
+                    verify_result = subprocess.run(verify_cmd, capture_output=True,
+                                                   text=True, check=False)
                     if 'audio' in verify_result.stdout:
                         print("✓ Output video contains audio!")
                     else:
@@ -642,13 +653,12 @@ def get_custom_audio() -> Optional[Path]:
         
         # Check if it's a valid audio file
         audio_check_cmd = ['ffprobe', '-v', 'error', '-i', str(selected_audio)]
-        check_result = subprocess.run(audio_check_cmd, capture_output=True, text=True)
+        check_result = subprocess.run(audio_check_cmd, capture_output=True, text=True, check=False)
         if check_result.returncode == 0:
             print("✓ Audio file validation successful")
             return selected_audio
-        else:
-            print(f"Audio validation failed: {check_result.stderr}")
-            return None
+        print(f"Audio validation failed: {check_result.stderr}")
+        return None
     except Exception as e:
         print(f"Error checking audio file: {e}")
         return None
@@ -656,24 +666,24 @@ def get_custom_audio() -> Optional[Path]:
 def get_youtube_credentials() -> Credentials:
     """
     Get or refresh YouTube API credentials
-    
+
     Returns:
         Google credentials for YouTube API
     """
     # YouTube API OAuth 2.0 scopes
-    SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
-    
+    scopes = ['https://www.googleapis.com/auth/youtube.upload']
+
     creds = None
     token_path = Path('token.json')
-    
+
     # Check if token.json exists
     if token_path.exists():
         try:
             creds = Credentials.from_authorized_user_info(
-                json.loads(token_path.read_text()), SCOPES)
+                json.loads(token_path.read_text(encoding='utf-8')), scopes)
         except Exception:
             pass
-    
+
     # If credentials don't exist or are invalid, get new ones
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
@@ -682,24 +692,24 @@ def get_youtube_credentials() -> Credentials:
             except Exception:
                 # Need new credentials
                 creds = None
-        
+
         # If still no valid credentials, need to go through OAuth flow
         if not creds:
             client_secrets_path = Path('client_secret.json')
-            
+
             if not client_secrets_path.exists():
                 print("Error: client_secret.json not found.")
                 print("Download it from Google Cloud Console and save it as client_secret.json")
                 sys.exit(1)
-            
+
             flow = InstalledAppFlow.from_client_secrets_file(
-                str(client_secrets_path), SCOPES)
+                str(client_secrets_path), scopes)
             creds = flow.run_local_server(port=0)
-        
+
         # Save the credentials for the next run
-        with open(token_path, 'w') as token:
+        with open(token_path, 'w', encoding='utf-8') as token:
             token.write(creds.to_json())
-    
+
     return creds
 
 def upload_to_youtube(video_path: Path, title: str, description: str, tags: List[str]) -> str:
@@ -814,23 +824,23 @@ async def main():
         music_path = get_custom_audio()
         if not music_path:
             print("No custom audio files found. Please add MP3, WAV, or M4A files to the audio directory.")
-            
+
     # Generate timestamp for unique filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_path = OUTPUT_DIR / f"horror_quotes_{timestamp}.mp4"
-    
+
     # Create video
     video_path = create_video(
-        frame_paths, 
-        output_path, 
-        music_path, 
+        frame_paths,
+        output_path,
+        music_path,
         duration_per_frame=args.duration
     )
-    
+
     # Optional: Upload to YouTube
     if args.upload:
         try:
-            video_id = upload_to_youtube(
+            upload_to_youtube(
                 video_path,
                 'Haunting Horror Movie Quotes',
                 'A collection of the most spine-chilling quotes from classic horror films',
@@ -839,9 +849,9 @@ async def main():
         except Exception as e:
             print(f"YouTube upload failed: {e}")
             print(f"Your video is still available locally at: {video_path}")
-    
+
     print("=" * 60)
-    print(f"✓ Process completed successfully!")
+    print("✓ Process completed successfully!")
     print(f"✓ Video saved to: {video_path}")
     print("=" * 60)
 
