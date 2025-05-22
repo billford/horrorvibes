@@ -1,3 +1,5 @@
+For details about this project, check out: [https://billford.io/@billfordx/vibing-my-way-to-horror-happiness-509432505faf](https://billford.io/vibing-my-way-to-horror-happiness-509432505faf)
+
 # Horror Movie Quote Video Generator
 
 A Python application that creates YouTube Shorts-style videos from horror movie quotes with custom background music. The script generates atmospheric gradient backgrounds, overlays memorable horror movie quotes, and combines everything into vertical videos perfect for social media.
