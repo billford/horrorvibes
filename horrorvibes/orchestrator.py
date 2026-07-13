@@ -103,9 +103,12 @@ def run_pipeline(  # pylint: disable=too-many-locals
     quotes.append_quote_history(config.run.quotes_history_path, generated_quotes)
     logger.info("Generated %d quotes", len(generated_quotes))
 
+    image_backends = imagegen.default_backends(config)
     frame_paths = []
     for i, quote_text in enumerate(generated_quotes):
-        image_result = imagegen.generate_image(quote_text, i, config, config.run.images_dir)
+        image_result = imagegen.generate_image(
+            quote_text, i, config, config.run.images_dir, backends=image_backends
+        )
         frame_path = config.run.frames_dir / f"frame_{i + 1}.png"
         compositor.compose_frame(
             image_result.path, quote_text, config.compositor, config.run.width, config.run.height, frame_path

@@ -118,7 +118,7 @@ def test_notify_failure_never_raises_on_runner_error():
 def test_run_pipeline_generates_expected_number_of_frames_and_video(config, monkeypatch):
     chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
 
-    def fake_generate_image(quote, index, cfg, images_dir):  # pylint: disable=unused-argument
+    def fake_generate_image(quote, index, cfg, images_dir, backends=None):
         path = images_dir / f"background_{index + 1}.png"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"img")
@@ -152,6 +152,46 @@ def test_run_pipeline_generates_expected_number_of_frames_and_video(config, monk
     assert len(list(config.run.frames_dir.glob("frame_*.png"))) == 2
 
 
+def test_run_pipeline_reuses_one_image_backend_set_across_all_quotes(config, monkeypatch):
+    """Regression test: run_pipeline must build the image backend chain ONCE
+    per run, not once per quote -- a prior version rebuilt it per-image,
+    which threw away LocalSDBackend's cached, lazily-loaded pipeline and
+    reloaded the model from disk before every single image."""
+    chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2\n'C' - Movie3"])
+    default_backends_calls = []
+
+    def fake_default_backends(cfg):
+        default_backends_calls.append(cfg)
+        return {"local_sd": lambda prompt, index, output_path: _write(output_path)}
+
+    monkeypatch.setattr(imagegen, "default_backends", fake_default_backends)
+    monkeypatch.setattr(
+        "horrorvibes.orchestrator.compositor.compose_frame",
+        lambda image_path, quote, comp_cfg, width, height, output_path: _write(output_path),
+    )
+    monkeypatch.setattr(
+        musicgen,
+        "generate_music",
+        lambda cfg, output_path, **kwargs: musicgen.MusicResult(
+            path=_write(output_path), backend_used="curated_file"
+        ),
+    )
+    monkeypatch.setattr(
+        video,
+        "assemble_video",
+        lambda frame_paths, output_path, audio_path, duration_per_frame, fps, runner: _write(output_path),
+    )
+
+    config = dataclasses.replace(
+        config,
+        run=dataclasses.replace(config.run, quote_count=3),
+        publish=dataclasses.replace(config.publish, youtube_upload=False),
+    )
+    run_pipeline(config, chat_client)
+
+    assert len(default_backends_calls) == 1
+
+
 def test_run_pipeline_forwards_music_api_key_to_generate_music(config, monkeypatch):
     """Regression test: run_pipeline must thread music_api_key through to
     musicgen.generate_music -- a prior version silently dropped it, sending
@@ -162,7 +202,7 @@ def test_run_pipeline_forwards_music_api_key_to_generate_music(config, monkeypat
     monkeypatch.setattr(
         imagegen,
         "generate_image",
-        lambda quote, index, cfg, images_dir: imagegen.ImageResult(
+        lambda quote, index, cfg, images_dir, backends=None: imagegen.ImageResult(
             path=_write(images_dir / f"background_{index + 1}.png"), backend_used="gradient"
         ),
     )
@@ -194,7 +234,7 @@ def test_run_pipeline_skips_upload_and_logs_when_publish_fails(config, monkeypat
     monkeypatch.setattr(
         imagegen,
         "generate_image",
-        lambda quote, index, cfg, images_dir: imagegen.ImageResult(
+        lambda quote, index, cfg, images_dir, backends=None: imagegen.ImageResult(
             path=_write(images_dir / f"background_{index + 1}.png"), backend_used="gradient"
         ),
     )
