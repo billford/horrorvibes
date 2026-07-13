@@ -1,0 +1,23 @@
+# Secrets -- never commit these
+.env
+client_secret.json
+token.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# Generated per-run working directories
+/quotes/
+/images/
+/frames/
+/output/
+quotes_history.txt
+smoke_test_output.png
+smoke_test_music.mp3
+
+# Logs and run-cadence state
+/logs/

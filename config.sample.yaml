@@ -1,0 +1,83 @@
+# horrorvibes config. Copy to config.yaml and adjust.
+# Any key you omit falls back to the built-in default in horrorvibes/config.py.
+
+run:
+  quote_count: 12
+  duration_per_quote_sec: 10
+  width: 1080
+  height: 1920
+  fps: 30
+  quotes_dir: ./quotes
+  images_dir: ./images
+  frames_dir: ./frames
+  output_dir: ./output
+  quotes_history_path: ./quotes_history.txt
+
+quotes:
+  model: gpt-4
+  max_attempts: 5
+  themes:
+    - classic horror
+    - modern horror
+    - psychological horror
+    - slasher films
+    - supernatural horror
+    - zombie films
+    - vampire movies
+    - ghost stories
+
+image:
+  # local_sd | openai | gradient -- this is the START of the fallback chain,
+  # which always continues local_sd -> openai -> gradient from wherever it starts.
+  backend: local_sd
+  sd_model: stabilityai/sdxl-turbo # confirm this is still the right tradeoff before relying on it -- see README
+  sd_device: mps
+  sd_steps: 4
+  sd_guidance_scale: 0.0
+  sd_timeout_sec: 120
+  openai_model: gpt-image-1
+  openai_timeout_sec: 60
+  style_suffix: >-
+    expressionist horror painting, dramatic chiaroscuro lighting,
+    high-contrast brushwork, bruised muted palette, textured canvas
+
+music:
+  # elevenlabs | curated_file
+  backend: elevenlabs
+  model_id: music_v1
+  mood_anchor: "meditative horror ambient, no vocals, no percussion hits"
+  mood_pool: [slow, sparse, drone, "unsettling calm", "minor key", distant]
+  mood_pool_sample_size: 3
+  api_timeout_sec: 120
+  max_retries: 3
+  retry_backoff_sec: 5
+  fallback_dir: ./audio
+
+compositor:
+  font_paths:
+    - /System/Library/Fonts/Supplemental/Arial Bold.ttf
+    - /Library/Fonts/Arial Bold.ttf
+    - /Library/Fonts/Helvetica.ttc
+  quote_font_size: 60
+  movie_font_size: 48
+  max_chars_per_line: 25
+  scrim_opacity: 150
+
+publish:
+  youtube_upload: true
+  # private | unlisted | public -- start private until you've watched a few
+  # unattended runs' worth of output, then flip this once you trust the pipeline.
+  privacy_status: private
+  category_id: "17"
+  client_secrets_path: ./client_secret.json
+  token_path: ./token.json
+
+logging:
+  level: INFO
+  file: ./logs/horrorvibes.log
+  max_bytes: 5000000
+  backup_count: 3
+
+automation:
+  min_hours_between_runs: 36
+  state_file: ./logs/last_run.json

@@ -1,0 +1,34 @@
+[project]
+name = "horrorvibes"
+version = "2.0.0"
+description = "Horror movie quote video generator: AI images + generated music + YouTube upload."
+requires-python = ">=3.11"
+
+[tool.pylint.main]
+py-version = "3.11"
+jobs = 0
+
+[tool.pylint."messages control"]
+disable = [
+    "missing-module-docstring",
+    "too-few-public-methods",
+    "duplicate-code",
+]
+
+[tool.pylint.format]
+max-line-length = 110
+
+[tool.pylint.design]
+max-args = 10
+max-positional-arguments = 10
+max-attributes = 10
+
+[tool.pylint.basic]
+good-names = ["i", "x", "y", "r", "g", "b", "fd"]
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv"]
+# B101 (assert_used): musicgen.with_retries uses `assert` purely as an
+# internal invariant check after a loop that always either returns or raises;
+# never on untrusted input.
+skips = ["B101"]
