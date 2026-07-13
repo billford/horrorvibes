@@ -8,9 +8,8 @@
   orchestrator.is_run_due() (see logs/last_run.json), not by launchd
   itself -- launchd has no native "every N days" primitive.
 
-  BEFORE installing, edit every /Users/YOUR_USERNAME/horrorvibes path
-  below to match lola's actual home directory and where you cloned the
-  repo, and confirm the python3 path matches `which python3` on lola.
+  Paths below are already set for this machine's actual clone at
+  /Users/billmathews/horrorvibes. Re-check them if you ever move the repo.
 
   Install with:
     cp com.billford.horrorvibes.plist ~/Library/LaunchAgents/
@@ -27,12 +26,12 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/YOUR_USERNAME/horrorvibes/.venv/bin/python3</string>
-        <string>/Users/YOUR_USERNAME/horrorvibes/run.py</string>
+        <string>/Users/billmathews/horrorvibes/.venv/bin/python3</string>
+        <string>/Users/billmathews/horrorvibes/run.py</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/YOUR_USERNAME/horrorvibes</string>
+    <string>/Users/billmathews/horrorvibes</string>
 
     <key>StartCalendarInterval</key>
     <dict>
@@ -43,10 +42,10 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/YOUR_USERNAME/horrorvibes/logs/launchd.out.log</string>
+    <string>/Users/billmathews/horrorvibes/logs/launchd.out.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/YOUR_USERNAME/horrorvibes/logs/launchd.err.log</string>
+    <string>/Users/billmathews/horrorvibes/logs/launchd.err.log</string>
 
     <key>RunAtLoad</key>
     <false/>
