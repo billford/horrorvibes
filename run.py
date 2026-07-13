@@ -49,7 +49,13 @@ def main(argv: list[str] | None = None) -> int:
 
     chat_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     force = args.force or args.quotes is not None
-    return main_unattended(config, chat_client, force=force, quote_count=args.quotes)
+    return main_unattended(
+        config,
+        chat_client,
+        force=force,
+        quote_count=args.quotes,
+        music_api_key=os.getenv("ELEVENLABS_API_KEY"),
+    )
 
 
 if __name__ == "__main__":

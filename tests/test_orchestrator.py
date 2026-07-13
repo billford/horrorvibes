@@ -152,6 +152,42 @@ def test_run_pipeline_generates_expected_number_of_frames_and_video(config, monk
     assert len(list(config.run.frames_dir.glob("frame_*.png"))) == 2
 
 
+def test_run_pipeline_forwards_music_api_key_to_generate_music(config, monkeypatch):
+    """Regression test: run_pipeline must thread music_api_key through to
+    musicgen.generate_music -- a prior version silently dropped it, sending
+    every ElevenLabs request with no API key (a 401, not a config error)."""
+    chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
+    received_kwargs = {}
+
+    monkeypatch.setattr(
+        imagegen,
+        "generate_image",
+        lambda quote, index, cfg, images_dir: imagegen.ImageResult(
+            path=_write(images_dir / f"background_{index + 1}.png"), backend_used="gradient"
+        ),
+    )
+    monkeypatch.setattr(
+        "horrorvibes.orchestrator.compositor.compose_frame",
+        lambda image_path, quote, comp_cfg, width, height, output_path: _write(output_path),
+    )
+    monkeypatch.setattr(
+        video,
+        "assemble_video",
+        lambda frame_paths, output_path, audio_path, duration_per_frame, fps, runner: _write(output_path),
+    )
+
+    def fake_generate_music(cfg, output_path, **kwargs):
+        received_kwargs.update(kwargs)
+        return musicgen.MusicResult(path=_write(output_path), backend_used="elevenlabs")
+
+    monkeypatch.setattr(musicgen, "generate_music", fake_generate_music)
+
+    config = dataclasses.replace(config, publish=dataclasses.replace(config.publish, youtube_upload=False))
+    run_pipeline(config, chat_client, music_api_key="the-real-key")
+
+    assert received_kwargs.get("api_key") == "the-real-key"
+
+
 def test_run_pipeline_skips_upload_and_logs_when_publish_fails(config, monkeypatch, caplog):
     chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
 

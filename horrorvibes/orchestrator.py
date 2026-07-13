@@ -89,6 +89,7 @@ def run_pipeline(  # pylint: disable=too-many-locals
     chat_client,
     quote_count: int | None = None,
     now: Callable[[], datetime] | None = None,
+    music_api_key: str | None = None,
 ) -> RunResult:
     """Run the full quote -> image -> music -> video -> publish pipeline once."""
     now = now or datetime.now
@@ -113,7 +114,7 @@ def run_pipeline(  # pylint: disable=too-many-locals
     logger.info("Composed %d frames", len(frame_paths))
 
     music_path = config.run.output_dir / "_music.mp3"
-    music_result = musicgen.generate_music(config, music_path)
+    music_result = musicgen.generate_music(config, music_path, api_key=music_api_key)
     logger.info("Music ready via %r backend", music_result.backend_used)
 
     timestamp = now().strftime("%Y%m%d_%H%M%S")
@@ -153,6 +154,7 @@ def main_unattended(
     chat_client,
     force: bool = False,
     quote_count: int | None = None,
+    music_api_key: str | None = None,
 ) -> int:
     """Entry point for the launchd job: cadence guard + failure notification.
 
@@ -166,7 +168,7 @@ def main_unattended(
         return 0
 
     try:
-        result = run_pipeline(config, chat_client, quote_count=quote_count)
+        result = run_pipeline(config, chat_client, quote_count=quote_count, music_api_key=music_api_key)
     except HorrorVibesError as exc:
         logger.error("Run failed: %s", exc, exc_info=True)
         notify_failure(f"horrorvibes run failed: {exc}")
