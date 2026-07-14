@@ -4,6 +4,12 @@ version = "2.0.0"
 description = "Horror movie quote video generator: AI images + generated music + YouTube upload."
 requires-python = ">=3.11"
 
+[tool.pytest.ini_options]
+# Without this, `pytest` (as opposed to `python -m pytest`) doesn't add the
+# repo root to sys.path, so `import horrorvibes` fails -- hit this in CI,
+# not locally, since local runs used `python -m pytest`.
+pythonpath = ["."]
+
 [tool.pylint.main]
 py-version = "3.11"
 jobs = 0
