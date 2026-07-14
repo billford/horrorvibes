@@ -1,6 +1,15 @@
 """Per-quote narration via the ElevenLabs text-to-speech API, plus ffmpeg
-command builders to mix that narration into the background music track
-with sidechain ducking (music quiets automatically while narration plays).
+command builders to mix that narration into the background music track,
+ducking the music at each narration's known start/end time and boosting
+narration gain so it's clearly audible over the music bed.
+
+An earlier version used ffmpeg's sidechaincompress, keyed off the
+narration's own loudness crossing a threshold -- but narration's RMS
+(~0.02-0.05) sat right at the chosen threshold while the music's RMS
+(~0.18-0.2) was well above it, so the compressor barely engaged and
+narration ended up inaudible under full-volume music. Since we already
+know each narration's exact timing, ducking the music at those known
+windows directly is both simpler and actually reliable.
 
 Narration is best-effort per quote -- a failed quote's narration is
 skipped (logged as a warning) rather than failing the whole run, matching
@@ -103,31 +112,55 @@ def generate_narrations(
     return results
 
 
-def build_ducked_mix_cmd(
+def narration_duration_sec(narration_path: Path) -> float:
+    """Probe a narration clip's duration without loading its audio into memory."""
+    import soundfile as sf  # pylint: disable=import-outside-toplevel
+
+    return sf.info(narration_path).duration
+
+
+def build_ducked_mix_cmd(  # pylint: disable=too-many-locals
     music_path: Path,
-    narration_entries: list[tuple[int, Path]],
+    narration_entries: list[tuple[int, Path, float]],
     duration_per_quote_sec: float,
     voiceover_config: VoiceoverConfig,
     output_path: Path,
 ) -> list[str]:
-    """ffmpeg argv: delay each narration clip to its quote's start time,
-    mix them together, then sidechain-duck the music under that mix so it
-    quiets automatically while narration plays. ``narration_entries`` is
-    (quote_index, path) pairs for quotes whose narration succeeded --
-    quote_index (not list position) drives the delay, so gaps from failed
-    quotes don't shift later narration out of place."""
+    """ffmpeg argv: boost and delay each narration clip to its quote's start
+    time, duck the music at those exact known windows, then mix. Ducking is
+    a plain ``volume`` filter enabled only during each narration's actual
+    [start, start+duration] window -- deterministic, unlike sidechain
+    compression, which depends on calibrating a threshold against signal
+    levels that vary per voice/track.
+
+    ``narration_entries`` is (quote_index, path, duration_sec) for quotes
+    whose narration succeeded -- quote_index (not list position) drives
+    the delay, so gaps from failed quotes don't shift later narration out
+    of sync.
+    """
     if not narration_entries:
         raise ValueError("build_ducked_mix_cmd requires at least one narration entry")
 
     inputs = ["-i", str(music_path)]
     delay_labels = []
-    for position, (quote_index, narration_path) in enumerate(narration_entries, start=1):
+    duck_windows = []
+    for position, (quote_index, narration_path, duration_sec) in enumerate(narration_entries, start=1):
         inputs.extend(["-i", str(narration_path)])
-        delay_ms = int(quote_index * duration_per_quote_sec * 1000)
+        start_sec = quote_index * duration_per_quote_sec
+        delay_ms = int(start_sec * 1000)
         delay_labels.append((position, f"d{position}", delay_ms))
+        duck_windows.append((start_sec, start_sec + duration_sec))
 
+    duck_condition = "+".join(f"between(t,{start},{end})" for start, end in duck_windows)
     filter_parts = [
-        f"[{position}:a]adelay={delay_ms}|{delay_ms}[{label}]" for position, label, delay_ms in delay_labels
+        f"[0:a]volume={voiceover_config.duck_volume}:enable='{duck_condition}':eval=frame[duckedmusic]"
+    ]
+    filter_parts += [
+        f"[{position}:a]volume={voiceover_config.narration_gain}[g{position}]"
+        for position, _, _ in delay_labels
+    ]
+    filter_parts += [
+        f"[g{position}]adelay={delay_ms}|{delay_ms}[{label}]" for position, label, delay_ms in delay_labels
     ]
 
     if len(delay_labels) == 1:
@@ -137,12 +170,7 @@ def build_ducked_mix_cmd(
         filter_parts.append(f"{joined_labels}amix=inputs={len(delay_labels)}:normalize=0[narrmix]")
         narration_mix_label = "narrmix"
 
-    filter_parts.append(
-        f"[0:a][{narration_mix_label}]sidechaincompress="
-        f"threshold={voiceover_config.duck_threshold}:ratio={voiceover_config.duck_ratio}:"
-        f"attack={voiceover_config.duck_attack_ms}:release={voiceover_config.duck_release_ms}[ducked]"
-    )
-    filter_parts.append(f"[ducked][{narration_mix_label}]amix=inputs=2:weights=1 1:normalize=0[final]")
+    filter_parts.append(f"[duckedmusic][{narration_mix_label}]amix=inputs=2:normalize=0[final]")
 
     return [
         "ffmpeg", "-y", *inputs,

@@ -96,7 +96,11 @@ def _build_final_audio_track(
     narrations = voiceover.generate_narrations(
         config.voiceover, generated_quotes, narration_dir, api_key=elevenlabs_api_key
     )
-    narration_entries = [(i, path) for i, path in enumerate(narrations) if path is not None]
+    narration_entries = [
+        (i, path, voiceover.narration_duration_sec(path))
+        for i, path in enumerate(narrations)
+        if path is not None
+    ]
     if not narration_entries:
         logger.warning("Voiceover enabled but every quote's narration failed; using music track as-is")
         return music_path

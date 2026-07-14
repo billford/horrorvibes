@@ -110,10 +110,11 @@ DEFAULTS: dict[str, Any] = {
         "api_timeout_sec": 60,
         "max_retries": 3,
         "retry_backoff_sec": 5,
-        "duck_threshold": 0.05,
-        "duck_ratio": 8,
-        "duck_attack_ms": 5,
-        "duck_release_ms": 300,
+        # Music volume during each narration's exact window (linear, 0-1) and
+        # narration's own gain boost -- see voiceover.py for why this replaced
+        # a sidechaincompress-based approach.
+        "duck_volume": 0.15,
+        "narration_gain": 1.6,
     },
     "logging": {
         "level": "INFO",
@@ -236,10 +237,8 @@ class VoiceoverConfig:
     api_timeout_sec: int
     max_retries: int
     retry_backoff_sec: int
-    duck_threshold: float
-    duck_ratio: float
-    duck_attack_ms: int
-    duck_release_ms: int
+    duck_volume: float
+    narration_gain: float
 
 
 @dataclass(frozen=True)
@@ -403,10 +402,8 @@ def load_config(path: str | Path) -> Config:
             api_timeout_sec=int(merged["voiceover"]["api_timeout_sec"]),
             max_retries=int(merged["voiceover"]["max_retries"]),
             retry_backoff_sec=int(merged["voiceover"]["retry_backoff_sec"]),
-            duck_threshold=float(merged["voiceover"]["duck_threshold"]),
-            duck_ratio=float(merged["voiceover"]["duck_ratio"]),
-            duck_attack_ms=int(merged["voiceover"]["duck_attack_ms"]),
-            duck_release_ms=int(merged["voiceover"]["duck_release_ms"]),
+            duck_volume=float(merged["voiceover"]["duck_volume"]),
+            narration_gain=float(merged["voiceover"]["narration_gain"]),
         ),
         logging=LoggingConfig(
             level=merged["logging"]["level"].upper(),

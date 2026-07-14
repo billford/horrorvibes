@@ -7,6 +7,7 @@ from horrorvibes.voiceover import (
     ElevenLabsVoiceoverBackend,
     build_ducked_mix_cmd,
     generate_narrations,
+    narration_duration_sec,
 )
 
 
@@ -90,12 +91,12 @@ def test_generate_narrations_skips_failed_quotes_without_raising(tmp_path, voice
     assert any("Narration failed" in r.message for r in caplog.records)
 
 
-def test_build_ducked_mix_cmd_single_entry_uses_delay_from_quote_index(tmp_path, voiceover_config):
+def test_build_ducked_mix_cmd_single_entry_uses_delay_and_window_from_quote_index(tmp_path, voiceover_config):
     narration_path = tmp_path / "narration_3.mp3"
 
     cmd = build_ducked_mix_cmd(
         tmp_path / "music.mp3",
-        [(2, narration_path)],  # quote index 2, not list position 0
+        [(2, narration_path, 3.5)],  # quote index 2, not list position 0; 3.5s long
         duration_per_quote_sec=10,
         voiceover_config=voiceover_config,
         output_path=tmp_path / "out.mp3",
@@ -103,14 +104,17 @@ def test_build_ducked_mix_cmd_single_entry_uses_delay_from_quote_index(tmp_path,
 
     filter_complex = cmd[cmd.index("-filter_complex") + 1]
     assert "adelay=20000|20000" in filter_complex
-    assert "sidechaincompress" in filter_complex
+    assert "between(t,20,23.5)" in filter_complex
+    assert f"volume={voiceover_config.duck_volume}" in filter_complex
+    assert f"volume={voiceover_config.narration_gain}" in filter_complex
+    assert "sidechaincompress" not in filter_complex
     assert "-map" in cmd and cmd[cmd.index("-map") + 1] == "[final]"
 
 
 def test_build_ducked_mix_cmd_multi_entry_mixes_narrations_before_ducking(tmp_path, voiceover_config):
     cmd = build_ducked_mix_cmd(
         tmp_path / "music.mp3",
-        [(0, tmp_path / "n1.mp3"), (5, tmp_path / "n2.mp3")],
+        [(0, tmp_path / "n1.mp3", 2.0), (5, tmp_path / "n2.mp3", 4.0)],
         duration_per_quote_sec=10,
         voiceover_config=voiceover_config,
         output_path=tmp_path / "out.mp3",
@@ -119,6 +123,8 @@ def test_build_ducked_mix_cmd_multi_entry_mixes_narrations_before_ducking(tmp_pa
     filter_complex = cmd[cmd.index("-filter_complex") + 1]
     assert "adelay=0|0" in filter_complex
     assert "adelay=50000|50000" in filter_complex
+    assert "between(t,0,2.0)" in filter_complex
+    assert "between(t,50,54.0)" in filter_complex
     assert "amix=inputs=2:normalize=0[narrmix]" in filter_complex
     assert "[narrmix]" in filter_complex
 
@@ -129,3 +135,13 @@ def test_build_ducked_mix_cmd_raises_on_empty_entries(tmp_path, voiceover_config
             tmp_path / "music.mp3", [], duration_per_quote_sec=10, voiceover_config=voiceover_config,
             output_path=tmp_path / "out.mp3",
         )
+
+
+def test_narration_duration_sec_reads_real_audio_length(tmp_path):
+    import soundfile as sf
+    import numpy as np
+
+    path = tmp_path / "narration.wav"
+    sf.write(path, np.zeros(44100 * 2), 44100)  # 2 seconds of silence
+
+    assert narration_duration_sec(path) == pytest.approx(2.0, abs=0.01)

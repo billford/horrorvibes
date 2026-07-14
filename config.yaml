@@ -79,11 +79,10 @@ voiceover:
   api_timeout_sec: 60
   max_retries: 3
   retry_backoff_sec: 5
-  # Sidechain-ducking: music quiets automatically while narration plays.
-  duck_threshold: 0.05
-  duck_ratio: 8
-  duck_attack_ms: 5
-  duck_release_ms: 300
+  # Music volume during each narration's exact window (linear, 0-1), and a
+  # gain boost applied to narration so it isn't buried under the music bed.
+  duck_volume: 0.15
+  narration_gain: 1.6
 
 compositor:
   font_paths:

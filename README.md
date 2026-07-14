@@ -139,16 +139,24 @@ whatever `music.backend` is currently set.
 `voiceover.enabled: true` reads each quote aloud via the ElevenLabs text-to-speech API in a configurable
 voice (`voiceover.voice_id`, defaults to "Clyde" -- audition others at
 [elevenlabs.io/voice-library](https://elevenlabs.io/voice-library) and swap freely), mixed into the
-background music track with the music **automatically ducking** (quieting) while narration plays via
-`ffmpeg`'s `sidechaincompress` filter, then restoring volume in the gaps between quotes.
+background music track with the music **ducking** (quieting) during each narration clip's exact known
+window, then restoring to full volume in the gaps between quotes.
+
+Ducking is keyed to each narration's actual timing (`ffmpeg`'s `volume` filter with a per-window `enable`
+expression), not a signal-level threshold -- an earlier sidechain-compression approach looked reasonable on
+paper but a real listen showed narration buried under the music: its threshold was calibrated against
+narration's own loudness (~0.02-0.05 RMS), which sits right at the chosen cutoff, while the music's loudness
+(~0.18-0.2 RMS) was well above it, so the compressor barely engaged. Since we already know exactly when each
+narration plays, ducking those known windows directly is simpler and actually reliable.
 
 - One narration clip per quote, generated independently -- a single quote's narration failing (network
   blip, rate limit) skips just that quote's narration rather than failing the run; if every quote's
   narration fails, the plain music track is used as-is.
 - Uses the same `ELEVENLABS_API_KEY` as `music.backend: elevenlabs` -- this is additional spend on top of
   whichever music backend you're using, not a separate subscription.
-- Ducking is tunable via `voiceover.duck_threshold`/`duck_ratio`/`duck_attack_ms`/`duck_release_ms` if the
-  default mix doesn't sit right for your content.
+- Tunable via `voiceover.duck_volume` (music's linear volume, 0-1, during narration) and
+  `voiceover.narration_gain` (narration's own volume boost) if the default mix doesn't sit right for your
+  content.
 
 **Testing**: `tests/test_voiceover.py` covers the ducked-mix `ffmpeg` command construction (single- and
 multi-narration cases, delay offsets keyed to each quote's actual index so failed quotes don't shift later

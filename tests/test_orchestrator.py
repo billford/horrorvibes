@@ -286,6 +286,7 @@ def test_run_pipeline_mixes_narration_when_voiceover_enabled(config, monkeypatch
             _write(output_dir / "narration_2.mp3"),
         ],
     )
+    monkeypatch.setattr(voiceover, "narration_duration_sec", lambda path: 2.0)
 
     def fake_ffmpeg_run(cmd, capture_output=True, text=True, check=False):
         Path(cmd[-1]).write_bytes(b"mixed")
@@ -337,6 +338,7 @@ def test_run_pipeline_falls_back_to_music_when_mix_ffmpeg_fails(config, monkeypa
             None,
         ],
     )
+    monkeypatch.setattr(voiceover, "narration_duration_sec", lambda path: 2.0)
     monkeypatch.setattr(
         "horrorvibes.orchestrator.subprocess.run",
         lambda cmd, capture_output=True, text=True, check=False: SimpleNamespace(
