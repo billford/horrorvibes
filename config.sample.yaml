@@ -74,7 +74,7 @@ voiceover:
   similarity_boost: 0.75
   style: 0.3
   use_speaker_boost: true
-  speed: 0.9
+  speed: 0.75  # slower, more menacing delivery -- 0.7 is ElevenLabs' floor before quality degrades
   api_timeout_sec: 60
   max_retries: 3
   retry_backoff_sec: 5
