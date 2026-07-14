@@ -1,7 +1,9 @@
 """Per-run YouTube title/description/hashtags, built from the quotes
 actually in that video rather than a fixed generic blurb -- so uploads
 are properly described and discoverable instead of all sharing the same
-"Haunting Horror Movie Quotes" title regardless of content.
+generic title regardless of content. Horror movies and horror TV shows
+are equally welcome sources (see quotes.build_quote_request), so wording
+here stays agnostic between the two rather than saying "movie" only.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ import re
 from horrorvibes.textutil import split_quote_and_title
 
 _MAX_TITLE_LEN = 100
-_GENERIC_TAGS = ["horror", "horrormoviequotes", "scarymovies", "horrorshorts", "shorts"]
+_GENERIC_TAGS = ["horror", "horrorquotes", "scaryshows", "horrorshorts", "shorts"]
 
 
 def featured_movies(quotes: list[str]) -> list[str]:
@@ -49,7 +51,7 @@ def build_video_title(quotes: list[str], max_movies: int = 3) -> str:
     """A content-specific title naming a few of the featured films, within
     YouTube's title length limit. Drops whole movie names (starting from
     the last) rather than truncating mid-word if the full list doesn't fit."""
-    base = f"{len(quotes)} Bone-Chilling Horror Movie Quotes"
+    base = f"{len(quotes)} Bone-Chilling Horror Quotes"
     movies = featured_movies(quotes)
     if not movies:
         return base
@@ -66,7 +68,7 @@ def build_video_title(quotes: list[str], max_movies: int = 3) -> str:
 def build_video_description(quotes: list[str]) -> str:
     """Lists every quote and its film -- an actually useful, searchable
     description instead of generic boilerplate -- plus hashtags."""
-    lines = ["A collection of the most spine-chilling quotes from horror cinema:", ""]
+    lines = ["A collection of the most spine-chilling quotes from horror movies and TV shows:", ""]
     for i, quote in enumerate(quotes, start=1):
         quote_text, movie = split_quote_and_title(quote)
         lines.append(f"{i}. {quote_text} — {movie}")

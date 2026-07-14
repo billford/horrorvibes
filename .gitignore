@@ -16,6 +16,7 @@ __pycache__/
 /frames/
 /output/
 quotes_history.txt
+video_catalog.jsonl
 smoke_test_output.png
 smoke_test_music.mp3
 

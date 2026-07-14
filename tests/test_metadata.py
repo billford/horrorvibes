@@ -21,7 +21,7 @@ def test_featured_movies_dedupes_and_drops_unknown():
 
 def test_build_video_title_names_featured_movies():
     title = build_video_title(QUOTES)
-    assert title.startswith("4 Bone-Chilling Horror Movie Quotes")
+    assert title.startswith("4 Bone-Chilling Horror Quotes")
     assert "Halloween (1978)" in title
     assert "A Nightmare on Elm Street (1984)" in title
     assert "& More" not in title  # only 2 movies total, both fit under max_movies=3
@@ -34,7 +34,7 @@ def test_build_video_title_adds_and_more_when_movies_exceed_max():
 
 
 def test_build_video_title_falls_back_to_base_when_no_movies_parsed():
-    assert build_video_title(["No separator here"]) == "1 Bone-Chilling Horror Movie Quotes"
+    assert build_video_title(["No separator here"]) == "1 Bone-Chilling Horror Quotes"
 
 
 def test_build_video_title_truncates_to_youtube_limit():

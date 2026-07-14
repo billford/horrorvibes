@@ -215,9 +215,11 @@ this is your call to make in config.yaml, not something baked into the code.
 ## Video metadata and the quote catalog
 
 Every upload gets a content-specific title, description, and hashtags (`horrorvibes/metadata.py`) built from
-that run's actual quotes -- not a fixed generic blurb. The title names a few of the featured films (e.g. "12
-Bone-Chilling Horror Movie Quotes | Halloween, Scream & More"), the description lists every quote with its
-film, and hashtags combine generic horror tags with one per featured movie.
+that run's actual quotes -- not a fixed generic blurb. The title names a few of the featured movies/shows
+(e.g. "12 Bone-Chilling Horror Quotes | Halloween, Stranger Things & More"), the description lists every
+quote with its source, and hashtags combine generic horror tags with one per featured title. Quotes are
+sourced from horror movies and horror TV shows equally (see `quotes.build_quote_request`) -- neither is
+preferred over the other.
 
 Separately, `run.video_catalog_path` (default `./video_catalog.jsonl`) gets one append-only JSON-lines record
 per run -- timestamp, video path, YouTube video ID (if uploaded), and every quote + its movie -- regardless
