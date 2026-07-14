@@ -12,7 +12,6 @@ import logging
 import math
 import random
 import subprocess  # nosec B404 - no shell=True anywhere below
-import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -205,6 +204,37 @@ def build_music_assembly_cmd(
     ]
 
 
+def _patch_brownian_tree_margin() -> None:
+    """Work around a real bug in how CosineDPMSolverMultistepScheduler feeds
+    torchsde: its BrownianTreeNoiseSampler builds its tree with bounds
+    exactly equal to the sigma schedule's own [sigma_min, sigma_max]
+    extremes, so the first/last real queries touch the tree's edge
+    exactly -- landing just outside it (infinite bisection ->
+    RecursionError) or exactly on it (zero-width interval -> NaN output).
+    Building the tree with a small margin outside those bounds keeps every
+    real query strictly inside it, without changing the actual denoising
+    sigma schedule (unlike clamping the schedule itself, which silently
+    produced silent/NaN output in testing).
+    """
+    from diffusers.schedulers import (  # pylint: disable=import-outside-toplevel
+        scheduling_cosine_dpmsolver_multistep as sched_module,
+    )
+
+    if getattr(sched_module.BrownianTreeNoiseSampler, "_horrorvibes_margined", False):
+        return
+
+    original = sched_module.BrownianTreeNoiseSampler
+
+    class _MarginedBrownianTreeNoiseSampler(original):
+        _horrorvibes_margined = True
+
+        def __init__(self, x, sigma_min, sigma_max, seed=None, transform=lambda v: v):
+            margin = max(1e-3, (sigma_max - sigma_min) * 1e-4)
+            super().__init__(x, sigma_min - margin, sigma_max + margin, seed=seed, transform=transform)
+
+    sched_module.BrownianTreeNoiseSampler = _MarginedBrownianTreeNoiseSampler
+
+
 class LocalMusicBackend:
     """Local Stable Audio Open generation via diffusers on the Apple Silicon
     MPS backend. The model natively caps out well under a full run's
@@ -222,14 +252,13 @@ class LocalMusicBackend:
             import torch  # pylint: disable=import-outside-toplevel
             from diffusers import StableAudioPipeline  # pylint: disable=import-outside-toplevel
 
+            _patch_brownian_tree_margin()
+
             logger.info(
                 "Loading local music model %s (device=%s)",
                 self._config.local_model,
                 self._config.local_device,
             )
-            # float32, not float16: the scheduler's torchsde-based Brownian
-            # sampler hits float16 precision limits subdividing time
-            # intervals and recurses until Python's stack gives out.
             pipeline = StableAudioPipeline.from_pretrained(
                 self._config.local_model, torch_dtype=torch.float32
             )
@@ -242,24 +271,17 @@ class LocalMusicBackend:
         import soundfile as sf  # pylint: disable=import-outside-toplevel
         import torch  # pylint: disable=import-outside-toplevel
 
-        generator = torch.Generator(device=self._config.local_device).manual_seed(seed)
-
-        # Defensive margin on top of the float32 fix above -- the same
-        # torchsde recursion has been reported even in float32 in some
-        # diffusers/torchsde version combinations.
-        previous_limit = sys.getrecursionlimit()
-        sys.setrecursionlimit(max(previous_limit, 10_000))
-        try:
-            result = pipeline(
-                prompt=prompt,
-                negative_prompt=self._config.local_negative_prompt,
-                num_inference_steps=self._config.local_steps,
-                audio_end_in_s=length_sec,
-                num_waveforms_per_prompt=1,
-                generator=generator,
-            )
-        finally:
-            sys.setrecursionlimit(previous_limit)
+        # A CPU generator, even though the pipeline itself runs on mps --
+        # MPS's own RNG has been unreliable for this model in testing.
+        generator = torch.Generator(device="cpu").manual_seed(seed)
+        result = pipeline(
+            prompt=prompt,
+            negative_prompt=self._config.local_negative_prompt,
+            num_inference_steps=self._config.local_steps,
+            audio_end_in_s=length_sec,
+            num_waveforms_per_prompt=1,
+            generator=generator,
+        )
 
         audio = result.audios[0].T.float().cpu().numpy()
         sf.write(output_path, audio, pipeline.vae.sampling_rate)
