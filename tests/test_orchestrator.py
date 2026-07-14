@@ -11,7 +11,9 @@ from horrorvibes import imagegen, musicgen, publish, video, voiceover
 from horrorvibes.config import load_config
 from horrorvibes.exceptions import PublishError, QuoteGenerationError
 from horrorvibes.orchestrator import (
+    _archive_completed_video,
     _compute_quote_schedule,
+    _external_drive_available,
     is_run_due,
     main_unattended,
     notify_failure,
@@ -463,6 +465,73 @@ def test_run_pipeline_falls_back_to_music_when_mix_ffmpeg_fails(config, monkeypa
 
     assert video_calls[0].name == "_music.mp3"
     assert any("mix failed" in r.message.lower() for r in caplog.records)
+
+
+# ---- video archiving to an external drive ---------------------------------------
+
+
+def test_external_drive_available_true_for_non_volumes_path(tmp_path):
+    assert _external_drive_available(tmp_path / "some" / "nested" / "path") is True
+
+
+def test_external_drive_available_true_when_mount_point_exists():
+    assert _external_drive_available(Path("/Volumes/My Book/out"), is_dir=lambda p: True) is True
+
+
+def test_external_drive_available_false_when_mount_point_missing():
+    assert _external_drive_available(Path("/Volumes/Definitely Not Plugged In/out")) is False
+
+
+def test_archive_completed_video_does_nothing_when_unconfigured(config, tmp_path):
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"video")
+    config = dataclasses.replace(config, run=dataclasses.replace(config.run, completed_video_dir=None))
+
+    _archive_completed_video(config, video_path)  # should not raise, nothing to assert on disk
+
+
+def test_archive_completed_video_copies_to_configured_dir(config, tmp_path):
+    video_path = tmp_path / "output" / "video.mp4"
+    video_path.parent.mkdir(parents=True, exist_ok=True)
+    video_path.write_bytes(b"video-bytes")
+    archive_dir = tmp_path / "archive"
+    config = dataclasses.replace(
+        config, run=dataclasses.replace(config.run, completed_video_dir=archive_dir)
+    )
+
+    _archive_completed_video(config, video_path)
+
+    assert (archive_dir / "video.mp4").read_bytes() == b"video-bytes"
+    assert video_path.exists()  # original stays in place too
+
+
+def test_archive_completed_video_warns_without_raising_when_drive_unavailable(config, tmp_path, caplog):
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"video")
+    unavailable = Path("/Volumes/Definitely Not Plugged In/horrorvibes_output")
+    config = dataclasses.replace(
+        config, run=dataclasses.replace(config.run, completed_video_dir=unavailable)
+    )
+
+    with caplog.at_level("WARNING"):
+        _archive_completed_video(config, video_path)  # should not raise
+
+    assert any("not available" in r.message for r in caplog.records)
+
+
+def test_run_pipeline_archives_video_when_configured(config, monkeypatch, tmp_path):
+    chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
+    _mock_non_voiceover_stages(monkeypatch)
+
+    archive_dir = tmp_path / "archive"
+    config = dataclasses.replace(
+        config,
+        publish=dataclasses.replace(config.publish, youtube_upload=False),
+        run=dataclasses.replace(config.run, completed_video_dir=archive_dir),
+    )
+    result = run_pipeline(config, chat_client)
+
+    assert (archive_dir / result.video_path.name).exists()
 
 
 def test_run_pipeline_skips_upload_and_logs_when_publish_fails(config, monkeypatch, caplog):

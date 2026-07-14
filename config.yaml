@@ -12,6 +12,10 @@ run:
   frames_dir: ./frames
   output_dir: ./output
   quotes_history_path: ./quotes_history.txt
+  # Also copy each completed video here (best-effort; if this path is under
+  # /Volumes and the drive isn't mounted, archiving is skipped with a
+  # warning rather than failing the run or writing to the boot disk).
+  completed_video_dir: "/Volumes/My Book/horrorvibes_output"
 
 quotes:
   model: gpt-4

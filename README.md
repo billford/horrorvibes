@@ -235,6 +235,16 @@ fires a macOS local notification (`osascript -e 'display notification ...'`), si
 unattended run in real time. `quotes_history.txt` and the run-cadence state file are both written via a
 write-temp-then-rename pattern, so a crash mid-run can't leave either half-written.
 
+## Archiving completed videos
+
+Set `run.completed_video_dir` (e.g. an external drive path) to also copy each finished video there --
+useful for keeping a growing library of runs somewhere other than the working `output_dir`. It's best-effort:
+if the configured path lives under `/Volumes/<name>` (a macOS external-volume mount point) and that top-level
+directory doesn't already exist, the drive isn't plugged in, and archiving is skipped with a logged warning
+rather than failing the run -- or, worse, silently creating a same-named folder on the boot disk instead of
+the actual drive, which is what a naive `mkdir(parents=True)` would do if the mount point is absent. The
+video always stays in `output_dir` regardless of whether archiving succeeds.
+
 ## Directory structure
 
 ```

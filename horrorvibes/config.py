@@ -33,6 +33,9 @@ DEFAULTS: dict[str, Any] = {
         "frames_dir": "./frames",
         "output_dir": "./output",
         "quotes_history_path": "./quotes_history.txt",
+        # Optional: also copy each completed video here (e.g. an external
+        # drive). None disables archiving -- videos stay in output_dir only.
+        "completed_video_dir": None,
     },
     "quotes": {
         "model": "gpt-4",
@@ -161,6 +164,7 @@ class RunConfig:
     frames_dir: Path
     output_dir: Path
     quotes_history_path: Path
+    completed_video_dir: Path | None
 
 
 @dataclass(frozen=True)
@@ -352,6 +356,11 @@ def load_config(path: str | Path) -> Config:
             frames_dir=Path(merged["run"]["frames_dir"]),
             output_dir=Path(merged["run"]["output_dir"]),
             quotes_history_path=Path(merged["run"]["quotes_history_path"]),
+            completed_video_dir=(
+                Path(merged["run"]["completed_video_dir"])
+                if merged["run"]["completed_video_dir"]
+                else None
+            ),
         ),
         quotes=QuotesConfig(
             model=merged["quotes"]["model"],

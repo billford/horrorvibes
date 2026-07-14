@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import subprocess  # nosec B404 - no shell=True anywhere below
 import tempfile
 from dataclasses import dataclass
@@ -82,6 +83,43 @@ def setup_directories(config: Config) -> None:
     directories = (config.run.quotes_dir, config.run.images_dir, config.run.frames_dir, config.run.output_dir)
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)
+
+
+def _external_drive_available(path: Path, is_dir: Callable[[Path], bool] = Path.is_dir) -> bool:
+    """On macOS, external volumes mount under /Volumes/<name>. If that
+    mount-point directory doesn't already exist, the drive isn't plugged
+    in -- don't create it ourselves, since mkdir(parents=True) would
+    silently create a phantom folder on the boot disk under /Volumes
+    instead of failing loudly when the real drive is absent."""
+    parts = path.parts
+    if len(parts) >= 3 and parts[1] == "Volumes":
+        return is_dir(Path(parts[0], parts[1], parts[2]))
+    return True  # not a /Volumes path -- let the normal mkdir/copy handle it
+
+
+def _archive_completed_video(config: Config, video_path: Path) -> None:
+    """Best-effort copy of the finished video to run.completed_video_dir, if
+    configured. Never raises -- an unavailable archive drive must not fail
+    the run; the video is already safe in output_dir either way."""
+    archive_dir = config.run.completed_video_dir
+    if archive_dir is None:
+        return
+
+    if not _external_drive_available(archive_dir):
+        logger.warning(
+            "Archive directory %s not available (drive not mounted?); video stays in %s only",
+            archive_dir,
+            video_path,
+        )
+        return
+
+    try:
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        archive_path = archive_dir / video_path.name
+        shutil.copy2(video_path, archive_path)
+        logger.info("Archived completed video to %s", archive_path)
+    except OSError:
+        logger.warning("Failed to archive video to %s", archive_dir, exc_info=True)
 
 
 def _generate_narrations_if_enabled(
@@ -215,6 +253,7 @@ def run_pipeline(  # pylint: disable=too-many-locals
         config.run.fps,
         runner=subprocess.run,
     )
+    _archive_completed_video(config, video_path)
 
     youtube_video_id: str | None = None
     if config.publish.youtube_upload:
