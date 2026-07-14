@@ -46,19 +46,21 @@ def build_video_hashtags(quotes: list[str], max_tags: int = 15) -> list[str]:
 
 
 def build_video_title(quotes: list[str], max_movies: int = 3) -> str:
-    """A content-specific title naming a few of the featured films,
-    truncated to YouTube's title length limit."""
+    """A content-specific title naming a few of the featured films, within
+    YouTube's title length limit. Drops whole movie names (starting from
+    the last) rather than truncating mid-word if the full list doesn't fit."""
     base = f"{len(quotes)} Bone-Chilling Horror Movie Quotes"
     movies = featured_movies(quotes)
     if not movies:
         return base
 
-    named = movies[:max_movies]
-    suffix = " | " + ", ".join(named) + (" & More" if len(movies) > max_movies else "")
-    title = base + suffix
-    if len(title) > _MAX_TITLE_LEN:
-        title = title[: _MAX_TITLE_LEN - 1].rstrip() + "…"
-    return title
+    for count in range(min(max_movies, len(movies)), 0, -1):
+        named = movies[:count]
+        suffix = " | " + ", ".join(named) + (" & More" if len(movies) > count else "")
+        title = base + suffix
+        if len(title) <= _MAX_TITLE_LEN:
+            return title
+    return base  # naming even one movie didn't fit -- fall back to the base title alone
 
 
 def build_video_description(quotes: list[str]) -> str:
