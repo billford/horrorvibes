@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from horrorvibes import compositor, imagegen, musicgen, publish, quotes, video, voiceover
+from horrorvibes import catalog, compositor, imagegen, metadata, musicgen, publish, quotes, video, voiceover
 from horrorvibes.config import AutomationConfig, Config
 from horrorvibes.exceptions import HorrorVibesError, PublishError
 
@@ -260,15 +260,20 @@ def run_pipeline(  # pylint: disable=too-many-locals
         try:
             youtube_video_id = publish.publish(
                 video_path,
-                "Haunting Horror Movie Quotes",
-                "A collection of the most spine-chilling quotes from classic horror films",
-                ["horror", "movie quotes", "scary", "horror films", "shorts"],
+                metadata.build_video_title(generated_quotes),
+                metadata.build_video_description(generated_quotes),
+                metadata.build_video_hashtags(generated_quotes),
                 config.publish,
             )
         except PublishError:
             logger.error(
                 "YouTube upload failed; video remains available locally at %s", video_path, exc_info=True
             )
+
+    catalog.append_entry(
+        config.run.video_catalog_path,
+        catalog.build_catalog_entry(video_path, generated_quotes, youtube_video_id, now()),
+    )
 
     return RunResult(
         video_path=video_path, quote_count=len(generated_quotes), youtube_video_id=youtube_video_id

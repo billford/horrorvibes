@@ -36,6 +36,10 @@ DEFAULTS: dict[str, Any] = {
         # Optional: also copy each completed video here (e.g. an external
         # drive). None disables archiving -- videos stay in output_dir only.
         "completed_video_dir": None,
+        # Durable, append-only record of every quote that's appeared in a
+        # generated video, so you can search back later for which video a
+        # particular quote/movie was used in.
+        "video_catalog_path": "./video_catalog.jsonl",
     },
     "quotes": {
         "model": "gpt-4",
@@ -165,6 +169,7 @@ class RunConfig:
     output_dir: Path
     quotes_history_path: Path
     completed_video_dir: Path | None
+    video_catalog_path: Path
 
 
 @dataclass(frozen=True)
@@ -361,6 +366,7 @@ def load_config(path: str | Path) -> Config:
                 if merged["run"]["completed_video_dir"]
                 else None
             ),
+            video_catalog_path=Path(merged["run"]["video_catalog_path"]),
         ),
         quotes=QuotesConfig(
             model=merged["quotes"]["model"],

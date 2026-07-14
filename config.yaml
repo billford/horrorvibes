@@ -16,6 +16,9 @@ run:
   # /Volumes and the drive isn't mounted, archiving is skipped with a
   # warning rather than failing the run or writing to the boot disk).
   completed_video_dir: "/Volumes/My Book/horrorvibes_output"
+  # Durable, append-only record of every quote that's appeared in a video --
+  # search it later to find which video a quote/movie was used in.
+  video_catalog_path: ./video_catalog.jsonl
 
 quotes:
   model: gpt-4

@@ -1,6 +1,7 @@
 # pylint: disable=missing-function-docstring,missing-class-docstring,redefined-outer-name,unused-argument,unnecessary-lambda,import-outside-toplevel,use-implicit-booleaness-not-comparison
 
 import dataclasses
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -46,6 +47,7 @@ def config(tmp_path):
         frames_dir=tmp_path / "frames",
         output_dir=tmp_path / "output",
         quotes_history_path=tmp_path / "quotes_history.txt",
+        video_catalog_path=tmp_path / "video_catalog.jsonl",
     )
     rooted_music = dataclasses.replace(base.music, fallback_dir=tmp_path / "audio")
     rooted_publish = dataclasses.replace(
@@ -213,6 +215,42 @@ def test_run_pipeline_generates_expected_number_of_frames_and_video(config, monk
     assert result.youtube_video_id is None
     assert result.video_path.exists()
     assert len(list(config.run.frames_dir.glob("frame_*.png"))) == 2
+
+    catalog_lines = config.run.video_catalog_path.read_text(encoding="utf-8").splitlines()
+    assert len(catalog_lines) == 1
+    entry = json.loads(catalog_lines[0])
+    assert entry["youtube_video_id"] is None
+    assert entry["quotes"] == [
+        {"quote": "'A'", "movie": "Movie1"},
+        {"quote": "'B'", "movie": "Movie2"},
+    ]
+
+
+def test_run_pipeline_uses_content_specific_youtube_metadata(config, monkeypatch):
+    chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
+    _mock_non_voiceover_stages(monkeypatch)
+
+    published = {}
+
+    def fake_publish(video_path, title, description, tags, publish_config):  # pylint: disable=unused-argument
+        published["title"] = title
+        published["description"] = description
+        published["tags"] = tags
+        return "yt-video-id"
+
+    monkeypatch.setattr(publish, "publish", fake_publish)
+
+    config = dataclasses.replace(config, publish=dataclasses.replace(config.publish, youtube_upload=True))
+    result = run_pipeline(config, chat_client)
+
+    assert result.youtube_video_id == "yt-video-id"
+    assert "Movie1" in published["title"]
+    assert "Movie1" in published["description"]
+    assert "'A'" in published["description"]
+    assert "horror" in published["tags"]
+
+    entry = json.loads(config.run.video_catalog_path.read_text(encoding="utf-8").splitlines()[0])
+    assert entry["youtube_video_id"] == "yt-video-id"
 
 
 def test_run_pipeline_reuses_one_image_backend_set_across_all_quotes(config, monkeypatch):

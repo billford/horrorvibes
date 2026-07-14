@@ -212,6 +212,25 @@ publish without anyone reviewing each video first, we recommend staying on `priv
 few unattended runs' worth of output, then flipping to `unlisted` or `public` once you trust the pipeline --
 this is your call to make in config.yaml, not something baked into the code.
 
+## Video metadata and the quote catalog
+
+Every upload gets a content-specific title, description, and hashtags (`horrorvibes/metadata.py`) built from
+that run's actual quotes -- not a fixed generic blurb. The title names a few of the featured films (e.g. "12
+Bone-Chilling Horror Movie Quotes | Halloween, Scream & More"), the description lists every quote with its
+film, and hashtags combine generic horror tags with one per featured movie.
+
+Separately, `run.video_catalog_path` (default `./video_catalog.jsonl`) gets one append-only JSON-lines record
+per run -- timestamp, video path, YouTube video ID (if uploaded), and every quote + its movie -- regardless
+of whether that run uploaded successfully, so you can search back later for which video a particular quote
+or movie appeared in:
+
+```bash
+grep -i "halloween" video_catalog.jsonl
+```
+
+Written atomically (write-temp + rename), same pattern as `quotes_history.txt`, so a crash mid-run can't
+corrupt it.
+
 ## Automation on your Mac (launchd)
 
 `com.billford.horrorvibes.plist` is a `launchd` user agent template. **launchd has no native "every N days"
