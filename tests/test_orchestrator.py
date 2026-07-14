@@ -2,11 +2,12 @@
 
 import dataclasses
 from datetime import datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from horrorvibes import imagegen, musicgen, publish, video
+from horrorvibes import imagegen, musicgen, publish, video, voiceover
 from horrorvibes.config import load_config
 from horrorvibes.exceptions import PublishError, QuoteGenerationError
 from horrorvibes.orchestrator import (
@@ -192,10 +193,11 @@ def test_run_pipeline_reuses_one_image_backend_set_across_all_quotes(config, mon
     assert len(default_backends_calls) == 1
 
 
-def test_run_pipeline_forwards_music_api_key_to_generate_music(config, monkeypatch):
-    """Regression test: run_pipeline must thread music_api_key through to
-    musicgen.generate_music -- a prior version silently dropped it, sending
-    every ElevenLabs request with no API key (a 401, not a config error)."""
+def test_run_pipeline_forwards_elevenlabs_api_key_to_generate_music(config, monkeypatch):
+    """Regression test: run_pipeline must thread elevenlabs_api_key through
+    to musicgen.generate_music -- a prior version silently dropped it,
+    sending every ElevenLabs request with no API key (a 401, not a config
+    error)."""
     chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
     received_kwargs = {}
 
@@ -223,9 +225,135 @@ def test_run_pipeline_forwards_music_api_key_to_generate_music(config, monkeypat
     monkeypatch.setattr(musicgen, "generate_music", fake_generate_music)
 
     config = dataclasses.replace(config, publish=dataclasses.replace(config.publish, youtube_upload=False))
-    run_pipeline(config, chat_client, music_api_key="the-real-key")
+    run_pipeline(config, chat_client, elevenlabs_api_key="the-real-key")
 
     assert received_kwargs.get("api_key") == "the-real-key"
+
+
+def _mock_non_voiceover_stages(monkeypatch):
+    monkeypatch.setattr(
+        imagegen,
+        "generate_image",
+        lambda quote, index, cfg, images_dir, backends=None: imagegen.ImageResult(
+            path=_write(images_dir / f"background_{index + 1}.png"), backend_used="gradient"
+        ),
+    )
+    monkeypatch.setattr(
+        "horrorvibes.orchestrator.compositor.compose_frame",
+        lambda image_path, quote, comp_cfg, width, height, output_path: _write(output_path),
+    )
+    monkeypatch.setattr(
+        musicgen,
+        "generate_music",
+        lambda cfg, output_path, **kwargs: musicgen.MusicResult(
+            path=_write(output_path), backend_used="curated_file"
+        ),
+    )
+    recorded_video_calls = []
+
+    def fake_assemble_video(frame_paths, output_path, audio_path, duration_per_frame, fps, runner):
+        recorded_video_calls.append(audio_path)
+        return _write(output_path)
+
+    monkeypatch.setattr(video, "assemble_video", fake_assemble_video)
+    return recorded_video_calls
+
+
+def test_run_pipeline_uses_plain_music_when_voiceover_disabled(config, monkeypatch):
+    chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
+    video_calls = _mock_non_voiceover_stages(monkeypatch)
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("generate_narrations should not run when voiceover is disabled")
+
+    monkeypatch.setattr(voiceover, "generate_narrations", fail_if_called)
+
+    config = dataclasses.replace(config, publish=dataclasses.replace(config.publish, youtube_upload=False))
+    run_pipeline(config, chat_client)
+
+    assert video_calls[0].name == "_music.mp3"
+
+
+def test_run_pipeline_mixes_narration_when_voiceover_enabled(config, monkeypatch):
+    chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
+    video_calls = _mock_non_voiceover_stages(monkeypatch)
+
+    monkeypatch.setattr(
+        voiceover,
+        "generate_narrations",
+        lambda voiceover_cfg, quotes, output_dir, api_key=None, backend=None: [
+            _write(output_dir / "narration_1.mp3"),
+            _write(output_dir / "narration_2.mp3"),
+        ],
+    )
+
+    def fake_ffmpeg_run(cmd, capture_output=True, text=True, check=False):
+        Path(cmd[-1]).write_bytes(b"mixed")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr("horrorvibes.orchestrator.subprocess.run", fake_ffmpeg_run)
+
+    config = dataclasses.replace(
+        config,
+        publish=dataclasses.replace(config.publish, youtube_upload=False),
+        voiceover=dataclasses.replace(config.voiceover, enabled=True),
+    )
+    run_pipeline(config, chat_client)
+
+    assert video_calls[0].name == "_music_with_narration.mp3"
+
+
+def test_run_pipeline_falls_back_to_music_when_all_narrations_fail(config, monkeypatch, caplog):
+    chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
+    video_calls = _mock_non_voiceover_stages(monkeypatch)
+
+    monkeypatch.setattr(
+        voiceover,
+        "generate_narrations",
+        lambda voiceover_cfg, quotes, output_dir, api_key=None, backend=None: [None, None],
+    )
+
+    config = dataclasses.replace(
+        config,
+        publish=dataclasses.replace(config.publish, youtube_upload=False),
+        voiceover=dataclasses.replace(config.voiceover, enabled=True),
+    )
+    with caplog.at_level("WARNING"):
+        run_pipeline(config, chat_client)
+
+    assert video_calls[0].name == "_music.mp3"
+    assert any("every quote's narration failed" in r.message for r in caplog.records)
+
+
+def test_run_pipeline_falls_back_to_music_when_mix_ffmpeg_fails(config, monkeypatch, caplog):
+    chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
+    video_calls = _mock_non_voiceover_stages(monkeypatch)
+
+    monkeypatch.setattr(
+        voiceover,
+        "generate_narrations",
+        lambda voiceover_cfg, quotes, output_dir, api_key=None, backend=None: [
+            _write(output_dir / "narration_1.mp3"),
+            None,
+        ],
+    )
+    monkeypatch.setattr(
+        "horrorvibes.orchestrator.subprocess.run",
+        lambda cmd, capture_output=True, text=True, check=False: SimpleNamespace(
+            returncode=1, stderr="ffmpeg exploded"
+        ),
+    )
+
+    config = dataclasses.replace(
+        config,
+        publish=dataclasses.replace(config.publish, youtube_upload=False),
+        voiceover=dataclasses.replace(config.voiceover, enabled=True),
+    )
+    with caplog.at_level("WARNING"):
+        run_pipeline(config, chat_client)
+
+    assert video_calls[0].name == "_music.mp3"
+    assert any("mix failed" in r.message.lower() for r in caplog.records)
 
 
 def test_run_pipeline_skips_upload_and_logs_when_publish_fails(config, monkeypatch, caplog):

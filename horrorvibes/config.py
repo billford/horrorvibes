@@ -98,6 +98,23 @@ DEFAULTS: dict[str, Any] = {
         "client_secrets_path": "./client_secret.json",
         "token_path": "./token.json",  # nosec B105 - a file path default, not a credential value
     },
+    "voiceover": {
+        "enabled": False,
+        "voice_id": "2EiwWnXFnvU5JabPnv8n",  # "Clyde" -- gruff, unsettling; audition and swap freely
+        "model_id": "eleven_multilingual_v2",
+        "stability": 0.5,
+        "similarity_boost": 0.75,
+        "style": 0.3,
+        "use_speaker_boost": True,
+        "speed": 0.9,
+        "api_timeout_sec": 60,
+        "max_retries": 3,
+        "retry_backoff_sec": 5,
+        "duck_threshold": 0.05,
+        "duck_ratio": 8,
+        "duck_attack_ms": 5,
+        "duck_release_ms": 300,
+    },
     "logging": {
         "level": "INFO",
         "file": "./logs/horrorvibes.log",
@@ -205,6 +222,27 @@ class PublishConfig:
 
 
 @dataclass(frozen=True)
+class VoiceoverConfig:
+    """ElevenLabs text-to-speech narration + music-ducking settings."""
+
+    enabled: bool
+    voice_id: str
+    model_id: str
+    stability: float
+    similarity_boost: float
+    style: float
+    use_speaker_boost: bool
+    speed: float
+    api_timeout_sec: int
+    max_retries: int
+    retry_backoff_sec: int
+    duck_threshold: float
+    duck_ratio: float
+    duck_attack_ms: int
+    duck_release_ms: int
+
+
+@dataclass(frozen=True)
 class LoggingConfig:
     """Console + rotating-file logging settings."""
 
@@ -232,6 +270,7 @@ class Config:
     music: MusicConfig
     compositor: CompositorConfig
     publish: PublishConfig
+    voiceover: VoiceoverConfig
     logging: LoggingConfig
     automation: AutomationConfig
     raw: dict[str, Any] = field(repr=False, default_factory=dict)
@@ -351,6 +390,23 @@ def load_config(path: str | Path) -> Config:
             category_id=str(merged["publish"]["category_id"]),
             client_secrets_path=Path(merged["publish"]["client_secrets_path"]),
             token_path=Path(merged["publish"]["token_path"]),
+        ),
+        voiceover=VoiceoverConfig(
+            enabled=bool(merged["voiceover"]["enabled"]),
+            voice_id=merged["voiceover"]["voice_id"],
+            model_id=merged["voiceover"]["model_id"],
+            stability=float(merged["voiceover"]["stability"]),
+            similarity_boost=float(merged["voiceover"]["similarity_boost"]),
+            style=float(merged["voiceover"]["style"]),
+            use_speaker_boost=bool(merged["voiceover"]["use_speaker_boost"]),
+            speed=float(merged["voiceover"]["speed"]),
+            api_timeout_sec=int(merged["voiceover"]["api_timeout_sec"]),
+            max_retries=int(merged["voiceover"]["max_retries"]),
+            retry_backoff_sec=int(merged["voiceover"]["retry_backoff_sec"]),
+            duck_threshold=float(merged["voiceover"]["duck_threshold"]),
+            duck_ratio=float(merged["voiceover"]["duck_ratio"]),
+            duck_attack_ms=int(merged["voiceover"]["duck_attack_ms"]),
+            duck_release_ms=int(merged["voiceover"]["duck_release_ms"]),
         ),
         logging=LoggingConfig(
             level=merged["logging"]["level"].upper(),

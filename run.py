@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
         chat_client,
         force=force,
         quote_count=args.quotes,
-        music_api_key=os.getenv("ELEVENLABS_API_KEY"),
+        elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY"),
     )
 
 

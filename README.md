@@ -134,6 +134,28 @@ crossfade planning, and fallback ordering for both chain directions -- all with 
 or model inference. Use `python3 scripts/smoke_test_musicgen.py` to manually generate one real track with
 whatever `music.backend` is currently set.
 
+## Voiceover narration (experimental, opt-in)
+
+`voiceover.enabled: true` reads each quote aloud via the ElevenLabs text-to-speech API in a configurable
+voice (`voiceover.voice_id`, defaults to "Clyde" -- audition others at
+[elevenlabs.io/voice-library](https://elevenlabs.io/voice-library) and swap freely), mixed into the
+background music track with the music **automatically ducking** (quieting) while narration plays via
+`ffmpeg`'s `sidechaincompress` filter, then restoring volume in the gaps between quotes.
+
+- One narration clip per quote, generated independently -- a single quote's narration failing (network
+  blip, rate limit) skips just that quote's narration rather than failing the run; if every quote's
+  narration fails, the plain music track is used as-is.
+- Uses the same `ELEVENLABS_API_KEY` as `music.backend: elevenlabs` -- this is additional spend on top of
+  whichever music backend you're using, not a separate subscription.
+- Ducking is tunable via `voiceover.duck_threshold`/`duck_ratio`/`duck_attack_ms`/`duck_release_ms` if the
+  default mix doesn't sit right for your content.
+
+**Testing**: `tests/test_voiceover.py` covers the ducked-mix `ffmpeg` command construction (single- and
+multi-narration cases, delay offsets keyed to each quote's actual index so failed quotes don't shift later
+ones out of sync) and per-quote fallback behavior -- all with fakes, no real network calls. `orchestrator.py`
+falls back to the plain music track if voiceover is disabled, every narration fails, or the mix step itself
+fails, all covered in `tests/test_orchestrator.py`.
+
 ## Unattended YouTube upload
 
 Uploads use **refresh-token auth only** -- `publish.py` never falls back to opening a browser

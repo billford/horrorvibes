@@ -21,3 +21,6 @@ smoke_test_music.mp3
 
 # Logs and run-cadence state
 /logs/
+
+# macOS
+.DS_Store

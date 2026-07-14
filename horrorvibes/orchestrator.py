@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from horrorvibes import compositor, imagegen, musicgen, publish, quotes, video
+from horrorvibes import compositor, imagegen, musicgen, publish, quotes, video, voiceover
 from horrorvibes.config import AutomationConfig, Config
 from horrorvibes.exceptions import HorrorVibesError, PublishError
 
@@ -84,12 +84,47 @@ def setup_directories(config: Config) -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
 
+def _build_final_audio_track(
+    config: Config, generated_quotes: list[str], music_path: Path, elevenlabs_api_key: str | None
+) -> Path:
+    """Music alone, or music ducked under per-quote narration if
+    voiceover.enabled and at least one quote's narration succeeded."""
+    if not config.voiceover.enabled:
+        return music_path
+
+    narration_dir = config.run.output_dir / "narration"
+    narrations = voiceover.generate_narrations(
+        config.voiceover, generated_quotes, narration_dir, api_key=elevenlabs_api_key
+    )
+    narration_entries = [(i, path) for i, path in enumerate(narrations) if path is not None]
+    if not narration_entries:
+        logger.warning("Voiceover enabled but every quote's narration failed; using music track as-is")
+        return music_path
+
+    mixed_path = config.run.output_dir / "_music_with_narration.mp3"
+    cmd = voiceover.build_ducked_mix_cmd(
+        music_path, narration_entries, config.run.duration_per_quote_sec, config.voiceover, mixed_path
+    )
+    # nosec B603 - no shell=True; argv is built by build_ducked_mix_cmd, not user input
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # nosec B603
+    if result.returncode != 0:
+        logger.warning("Narration/music mix failed, using music track as-is: %s", result.stderr)
+        return music_path
+
+    logger.info(
+        "Mixed narration for %d/%d quotes into the music track",
+        len(narration_entries),
+        len(generated_quotes),
+    )
+    return mixed_path
+
+
 def run_pipeline(  # pylint: disable=too-many-locals
     config: Config,
     chat_client,
     quote_count: int | None = None,
     now: Callable[[], datetime] | None = None,
-    music_api_key: str | None = None,
+    elevenlabs_api_key: str | None = None,
 ) -> RunResult:
     """Run the full quote -> image -> music -> video -> publish pipeline once."""
     now = now or datetime.now
@@ -117,8 +152,12 @@ def run_pipeline(  # pylint: disable=too-many-locals
     logger.info("Composed %d frames", len(frame_paths))
 
     music_path = config.run.output_dir / "_music.mp3"
-    music_result = musicgen.generate_music(config, music_path, api_key=music_api_key)
+    music_result = musicgen.generate_music(config, music_path, api_key=elevenlabs_api_key)
     logger.info("Music ready via %r backend", music_result.backend_used)
+
+    final_audio_path = _build_final_audio_track(
+        config, generated_quotes, music_result.path, elevenlabs_api_key
+    )
 
     timestamp = now().strftime("%Y%m%d_%H%M%S")
     output_path = config.run.output_dir / f"horror_quotes_{timestamp}.mp4"
@@ -126,7 +165,7 @@ def run_pipeline(  # pylint: disable=too-many-locals
     video_path = video.assemble_video(
         frame_paths,
         output_path,
-        music_result.path,
+        final_audio_path,
         config.run.duration_per_quote_sec,
         config.run.fps,
         runner=subprocess.run,
@@ -157,7 +196,7 @@ def main_unattended(
     chat_client,
     force: bool = False,
     quote_count: int | None = None,
-    music_api_key: str | None = None,
+    elevenlabs_api_key: str | None = None,
 ) -> int:
     """Entry point for the launchd job: cadence guard + failure notification.
 
@@ -171,7 +210,9 @@ def main_unattended(
         return 0
 
     try:
-        result = run_pipeline(config, chat_client, quote_count=quote_count, music_api_key=music_api_key)
+        result = run_pipeline(
+            config, chat_client, quote_count=quote_count, elevenlabs_api_key=elevenlabs_api_key
+        )
     except HorrorVibesError as exc:
         logger.error("Run failed: %s", exc, exc_info=True)
         notify_failure(f"horrorvibes run failed: {exc}")
