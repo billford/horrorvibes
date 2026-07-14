@@ -31,8 +31,11 @@ transformers>=4.38.0
 accelerate>=0.27.0
 
 # Local Stable Audio Open music generation (Apple Silicon MPS backend) --
-# saving generated waveforms to disk before ffmpeg crossfades/encodes them
+# saving generated waveforms to disk before ffmpeg crossfades/encodes them.
+# torchsde is required by the pipeline's default scheduler even though it's
+# never imported directly in this codebase.
 soundfile>=0.12.0
+torchsde>=0.2.5
 
 # Dev / quality tooling
 pytest>=7.4.0
