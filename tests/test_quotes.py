@@ -1,6 +1,7 @@
 # pylint: disable=missing-function-docstring,missing-class-docstring,redefined-outer-name,unused-argument,unnecessary-lambda,import-outside-toplevel,use-implicit-booleaness-not-comparison
 
 import random
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -8,10 +9,13 @@ import pytest
 from horrorvibes.config import QuotesConfig
 from horrorvibes.exceptions import QuoteGenerationError
 from horrorvibes.quotes import (
+    append_movie_history,
     append_quote_history,
     build_quote_request,
     generate_quotes,
+    load_recent_movies,
     load_used_quotes,
+    normalize_movie,
     normalize_quote,
     write_quote_files,
 )
@@ -38,8 +42,15 @@ class FakeChatClient:
 
 
 @pytest.fixture
-def quotes_config():
-    return QuotesConfig(model="gpt-4", max_attempts=3, temperature=0.7, themes=["classic horror"])
+def quotes_config(tmp_path):
+    return QuotesConfig(
+        model="gpt-4",
+        max_attempts=3,
+        temperature=0.7,
+        themes=["classic horror"],
+        movie_history_path=tmp_path / "movie_history.jsonl",
+        movie_cooldown_days=14,
+    )
 
 
 def test_normalize_quote_strips_case_and_quote_chars():
@@ -148,3 +159,74 @@ def test_append_quote_history_noop_for_empty_list(tmp_path):
     history_path = tmp_path / "quotes_history.txt"
     append_quote_history(history_path, [])
     assert not history_path.exists()
+
+
+# ---- movie recency tracking --------------------------------------------------
+
+
+def test_normalize_movie_strips_case_and_whitespace():
+    assert normalize_movie("  The Shining  ") == "the shining"
+    assert normalize_movie("THE SHINING") == normalize_movie("the shining")
+
+
+def test_load_recent_movies_missing_file_returns_empty_set(tmp_path):
+    assert load_recent_movies(tmp_path / "missing.jsonl", datetime(2026, 1, 1), 14) == set()
+
+
+def test_load_recent_movies_filters_by_cooldown_window(tmp_path):
+    history_path = tmp_path / "movie_history.jsonl"
+    now = datetime(2026, 1, 20)
+    append_movie_history(history_path, ["The Shining"], now - timedelta(days=5))
+    append_movie_history(history_path, ["Poltergeist"], now - timedelta(days=20))
+
+    recent = load_recent_movies(history_path, now, cooldown_days=14)
+
+    assert recent == {"the shining"}
+
+
+def test_append_movie_history_is_additive_and_atomic(tmp_path):
+    history_path = tmp_path / "sub" / "movie_history.jsonl"
+    append_movie_history(history_path, ["The Shining"], datetime(2026, 1, 1))
+    append_movie_history(history_path, ["Poltergeist"], datetime(2026, 1, 2))
+
+    lines = history_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    assert list(history_path.parent.glob(".movie_history_*.tmp")) == []
+
+
+def test_append_movie_history_skips_unknown_and_empty_list(tmp_path):
+    history_path = tmp_path / "movie_history.jsonl"
+    append_movie_history(history_path, [], datetime(2026, 1, 1))
+    assert not history_path.exists()
+
+    append_movie_history(history_path, ["Unknown"], datetime(2026, 1, 1))
+    assert not history_path.exists()
+
+
+def test_generate_quotes_avoids_recent_movie_within_batch(tmp_path, quotes_config):
+    client = FakeChatClient(
+        [
+            "'A' - Movie1\n'B' - Movie1\n'C' - Movie2",
+        ]
+    )
+    history_path = tmp_path / "quotes_history.txt"
+
+    result = generate_quotes(client, quotes_config, count=2, history_path=history_path, rng=random.Random(1))
+
+    assert result == ["'A' - Movie1", "'C' - Movie2"]
+
+
+def test_generate_quotes_avoids_movie_from_recent_movies_param(tmp_path, quotes_config):
+    client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
+    history_path = tmp_path / "quotes_history.txt"
+
+    result = generate_quotes(
+        client,
+        quotes_config,
+        count=1,
+        history_path=history_path,
+        rng=random.Random(1),
+        recent_movies={"movie1"},
+    )
+
+    assert result == ["'B' - Movie2"]

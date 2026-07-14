@@ -35,16 +35,23 @@ quotes:
     - zombie films
     - vampire movies
     - ghost stories
+  # Durable record of which movie/show each quote came from, so the same
+  # one isn't quoted again too soon (within a video, or across nearby runs).
+  movie_history_path: ./movie_history.jsonl
+  movie_cooldown_days: 14
 
 image:
   # local_sd | openai | gradient -- this is the START of the fallback chain,
   # which always continues local_sd -> openai -> gradient from wherever it starts.
   backend: local_sd
-  sd_model: stabilityai/sdxl-turbo # confirm this is still the right tradeoff before relying on it -- see README
+  # Full SDXL base, not sdxl-turbo: turbo's 1-4 step distillation trades away
+  # prompt adherence for speed, and images stopped meaningfully relating to
+  # their quote/movie as a result (confirmed on a real run 2026-07-14).
+  sd_model: stabilityai/stable-diffusion-xl-base-1.0
   sd_device: mps
-  sd_steps: 4
-  sd_guidance_scale: 0.0
-  sd_timeout_sec: 120
+  sd_steps: 30
+  sd_guidance_scale: 7.0
+  sd_timeout_sec: 300
   openai_model: gpt-image-1
   openai_timeout_sec: 60
   style_suffix: >-

@@ -49,6 +49,7 @@ def config(tmp_path):
         quotes_history_path=tmp_path / "quotes_history.txt",
         video_catalog_path=tmp_path / "video_catalog.jsonl",
     )
+    rooted_quotes = dataclasses.replace(base.quotes, movie_history_path=tmp_path / "movie_history.jsonl")
     rooted_music = dataclasses.replace(base.music, fallback_dir=tmp_path / "audio")
     rooted_publish = dataclasses.replace(
         base.publish, token_path=tmp_path / "token.json", client_secrets_path=tmp_path / "client_secret.json"
@@ -57,7 +58,12 @@ def config(tmp_path):
         base.automation, state_file=tmp_path / "logs" / "last_run.json"
     )
     return dataclasses.replace(
-        base, run=rooted_run, music=rooted_music, publish=rooted_publish, automation=rooted_automation
+        base,
+        run=rooted_run,
+        quotes=rooted_quotes,
+        music=rooted_music,
+        publish=rooted_publish,
+        automation=rooted_automation,
     )
 
 

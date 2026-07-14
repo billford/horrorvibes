@@ -7,17 +7,19 @@ tests never make a real network call -- they pass a fake object whose
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import random
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from horrorvibes.config import QuotesConfig
 from horrorvibes.exceptions import QuoteGenerationError
+from horrorvibes.textutil import split_quote_and_title
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,60 @@ def load_used_quotes(history_path: Path) -> set[str]:
         if line:
             used.add(normalize_quote(line))
     return used
+
+
+def normalize_movie(movie: str) -> str:
+    """Normalize a movie/show title for duplicate comparison."""
+    return movie.lower().strip()
+
+
+def load_recent_movies(movie_history_path: Path, now: datetime, cooldown_days: float) -> set[str]:
+    """Normalized movie/show titles used within the last ``cooldown_days`` --
+    these are avoided for new quotes, so the same film doesn't get quoted
+    again and again across nearby runs. Movies used longer ago than that
+    are fair game again."""
+    if not movie_history_path.exists():
+        return set()
+
+    cutoff = now - timedelta(days=cooldown_days)
+    recent: set[str] = set()
+    for line in movie_history_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        entry = json.loads(line)
+        if datetime.fromisoformat(entry["timestamp"]) >= cutoff:
+            recent.add(entry["movie"])
+    return recent
+
+
+def append_movie_history(movie_history_path: Path, movies: list[str], timestamp: datetime) -> None:
+    """Atomically append one (normalized movie, timestamp) record per movie
+    (write-temp + rename), same pattern as append_quote_history. "Unknown"
+    (an unparseable title) is never recorded -- it isn't a real movie to
+    avoid repeating."""
+    entries = [
+        {"movie": normalize_movie(movie), "timestamp": timestamp.isoformat()}
+        for movie in movies
+        if movie != "Unknown"
+    ]
+    if not entries:
+        return
+
+    movie_history_path.parent.mkdir(parents=True, exist_ok=True)
+    existing = movie_history_path.read_text(encoding="utf-8") if movie_history_path.exists() else ""
+    new_content = existing + "".join(json.dumps(entry) + "\n" for entry in entries)
+
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(movie_history_path.parent), prefix=".movie_history_", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
+            tmp_file.write(new_content)
+        os.replace(tmp_name, movie_history_path)
+    except BaseException:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
 
 
 def build_quote_request(
@@ -114,8 +170,11 @@ def generate_quotes(  # pylint: disable=too-many-locals
     history_path: Path,
     rng: random.Random | None = None,
     now: Callable[[], datetime] | None = None,
+    recent_movies: set[str] | None = None,
 ) -> list[str]:
-    """Generate up to ``count`` unique horror quotes not present in history.
+    """Generate up to ``count`` unique horror quotes not present in history,
+    each from a movie/show not already used earlier in this batch or
+    recently in a prior run (``recent_movies`` -- see load_recent_movies).
 
     Raises QuoteGenerationError only if zero unique quotes could be produced
     after all attempts -- a partial result (fewer than requested) is
@@ -126,6 +185,10 @@ def generate_quotes(  # pylint: disable=too-many-locals
 
     used_quotes = load_used_quotes(history_path)
     logger.info("Found %d previously used quotes", len(used_quotes))
+
+    # Grows as quotes are accepted, so a movie already picked earlier in
+    # this same batch is avoided too, not just movies from prior runs.
+    avoided_movies = set(recent_movies) if recent_movies else set()
 
     new_quotes: list[str] = []
     for attempt in range(1, quotes_config.max_attempts + 1):
@@ -152,8 +215,15 @@ def generate_quotes(  # pylint: disable=too-many-locals
             if normalized in used_quotes:
                 logger.debug("Skipped duplicate quote: %.50s", line)
                 continue
+            _, movie = split_quote_and_title(line)
+            normalized_movie = normalize_movie(movie)
+            if movie != "Unknown" and normalized_movie in avoided_movies:
+                logger.debug("Skipped quote from a too-recently-used movie: %.50s", line)
+                continue
             new_quotes.append(line)
             used_quotes.add(normalized)
+            if movie != "Unknown":
+                avoided_movies.add(normalized_movie)
 
     if not new_quotes:
         raise QuoteGenerationError(

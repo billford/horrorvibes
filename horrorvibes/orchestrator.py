@@ -208,11 +208,19 @@ def run_pipeline(  # pylint: disable=too-many-locals
     setup_directories(config)
 
     count = quote_count if quote_count is not None else config.run.quote_count
+    recent_movies = quotes.load_recent_movies(
+        config.quotes.movie_history_path, now(), config.quotes.movie_cooldown_days
+    )
     generated_quotes = quotes.generate_quotes(
-        chat_client, config.quotes, count, config.run.quotes_history_path
+        chat_client, config.quotes, count, config.run.quotes_history_path, recent_movies=recent_movies
     )
     quotes.write_quote_files(config.run.quotes_dir, generated_quotes)
     quotes.append_quote_history(config.run.quotes_history_path, generated_quotes)
+    quotes.append_movie_history(
+        config.quotes.movie_history_path,
+        [quotes.split_quote_and_title(q)[1] for q in generated_quotes],
+        now(),
+    )
     logger.info("Generated %d quotes", len(generated_quotes))
 
     narrations = _generate_narrations_if_enabled(config, generated_quotes, elevenlabs_api_key)

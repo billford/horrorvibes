@@ -58,14 +58,23 @@ DEFAULTS: dict[str, Any] = {
             "vampire movies",
             "ghost stories",
         ],
+        # Durable record of which movie/show each quote came from, so the
+        # same one isn't quoted again too soon (within a single video, or
+        # across nearby runs) even if the quote text itself is different.
+        "movie_history_path": "./movie_history.jsonl",
+        "movie_cooldown_days": 14,
     },
     "image": {
         "backend": "local_sd",
-        "sd_model": "stabilityai/sdxl-turbo",
+        # Full SDXL base, not sdxl-turbo: turbo's 1-4 step distillation trades
+        # away prompt adherence for speed, and images stopped meaningfully
+        # relating to their quote/movie as a result. Slower per image, but
+        # cadence is every-other-day, so there's no real-time pressure.
+        "sd_model": "stabilityai/stable-diffusion-xl-base-1.0",
         "sd_device": "mps",
-        "sd_steps": 4,
-        "sd_guidance_scale": 0.0,
-        "sd_timeout_sec": 120,
+        "sd_steps": 30,
+        "sd_guidance_scale": 7.0,
+        "sd_timeout_sec": 300,
         "openai_model": "gpt-image-1",
         "openai_timeout_sec": 60,
         "style_suffix": (
@@ -180,6 +189,8 @@ class QuotesConfig:
     max_attempts: int
     temperature: float
     themes: list[str]
+    movie_history_path: Path
+    movie_cooldown_days: float
 
 
 @dataclass(frozen=True)
@@ -373,6 +384,8 @@ def load_config(path: str | Path) -> Config:
             max_attempts=int(merged["quotes"]["max_attempts"]),
             temperature=float(merged["quotes"]["temperature"]),
             themes=list(merged["quotes"]["themes"]),
+            movie_history_path=Path(merged["quotes"]["movie_history_path"]),
+            movie_cooldown_days=float(merged["quotes"]["movie_cooldown_days"]),
         ),
         image=ImageConfig(
             backend=merged["image"]["backend"],

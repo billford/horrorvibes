@@ -88,6 +88,13 @@ narrows but doesn't eliminate the risk -- there's no external quote database cro
 attribution is still possible. `quotes.py`'s history/dedup file gives you a durable record of exactly what was
 generated per run if you want to spot-check attributions after the fact.
 
+Beyond exact-text dedup, `quotes.py` also tracks which movie/show each quote came from in
+`quotes.movie_history_path` (default `./movie_history.jsonl`) and avoids picking another quote from that same
+title for `quotes.movie_cooldown_days` (default 14) -- both within a single run's batch and across separate
+runs. This is a second, independent guard: two differently-worded quotes can still both be from, say, *The
+Shining*, and exact-text dedup alone wouldn't catch that a video (or two nearby videos) is dominated by one
+film.
+
 ## Image generation
 
 `image.backend` in config.yaml picks where the fallback chain *starts*; it always continues
@@ -97,11 +104,12 @@ title + a fixed "expressionist horror art" style suffix -- it deliberately never
 quote text itself (SD is unreliable at in-image typography; the words are composited separately, see
 `compositor.py`).
 
-**Model choice**: `config.sample.yaml` ships with `stabilityai/sdxl-turbo` (few-step, fast -- a run of
-9-12 images should take a few minutes on an M1 Ultra, leaving headroom for `ffmpeg` encoding running
-concurrently). If you want higher fidelity at the cost of speed, `stabilityai/stable-diffusion-xl-base-1.0`
-with a higher `sd_steps` is a reasonable swap -- do a quick visual bake-off on your own hardware before
-committing, per the original design spec's open question on this.
+**Model choice**: `config.sample.yaml` ships with `stabilityai/stable-diffusion-xl-base-1.0` at 30 steps.
+An earlier version defaulted to `stabilityai/sdxl-turbo` (few-step, fast) for a quicker run, but a real
+production run on 2026-07-14 showed turbo's 1-4 step distillation trades away too much prompt adherence --
+the generated images stopped meaningfully relating to their quote/movie. If you want to trade fidelity back
+for speed, `sdxl-turbo` with `sd_guidance_scale: 0.0` is the faster option -- do your own visual bake-off
+before committing, since the tradeoff is real in both directions.
 
 **Testing**: `tests/test_imagegen.py` covers prompt construction and the fallback chain's control flow with
 injected fake backends -- it never loads a real model. Real local inference is not exercised by pytest (too
@@ -282,7 +290,8 @@ video always stays in `output_dir` regardless of whether archiving succeeds.
 ├── token.json                 # YouTube OAuth refresh token -- never commit this
 ├── audio/                     # curated fallback tracks for music.backend failures
 ├── quotes/ images/ frames/ output/   # working directories, recreated each run
-└── quotes_history.txt          # dedup history, appended atomically
+├── quotes_history.txt          # exact-quote dedup history, appended atomically
+└── movie_history.jsonl         # movie/show recency history, appended atomically
 ```
 
 ## Testing & code quality
