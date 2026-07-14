@@ -12,6 +12,7 @@ import logging
 import math
 import random
 import subprocess  # nosec B404 - no shell=True anywhere below
+import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -226,8 +227,11 @@ class LocalMusicBackend:
                 self._config.local_model,
                 self._config.local_device,
             )
+            # float32, not float16: the scheduler's torchsde-based Brownian
+            # sampler hits float16 precision limits subdividing time
+            # intervals and recurses until Python's stack gives out.
             pipeline = StableAudioPipeline.from_pretrained(
-                self._config.local_model, torch_dtype=torch.float16
+                self._config.local_model, torch_dtype=torch.float32
             )
             self._pipeline = pipeline.to(self._config.local_device)
         return self._pipeline
@@ -239,14 +243,24 @@ class LocalMusicBackend:
         import torch  # pylint: disable=import-outside-toplevel
 
         generator = torch.Generator(device=self._config.local_device).manual_seed(seed)
-        result = pipeline(
-            prompt=prompt,
-            negative_prompt=self._config.local_negative_prompt,
-            num_inference_steps=self._config.local_steps,
-            audio_end_in_s=length_sec,
-            num_waveforms_per_prompt=1,
-            generator=generator,
-        )
+
+        # Defensive margin on top of the float32 fix above -- the same
+        # torchsde recursion has been reported even in float32 in some
+        # diffusers/torchsde version combinations.
+        previous_limit = sys.getrecursionlimit()
+        sys.setrecursionlimit(max(previous_limit, 10_000))
+        try:
+            result = pipeline(
+                prompt=prompt,
+                negative_prompt=self._config.local_negative_prompt,
+                num_inference_steps=self._config.local_steps,
+                audio_end_in_s=length_sec,
+                num_waveforms_per_prompt=1,
+                generator=generator,
+            )
+        finally:
+            sys.setrecursionlimit(previous_limit)
+
         audio = result.audios[0].T.float().cpu().numpy()
         sf.write(output_path, audio, pipeline.vae.sampling_rate)
 
