@@ -11,6 +11,7 @@ from horrorvibes import imagegen, musicgen, publish, video, voiceover
 from horrorvibes.config import load_config
 from horrorvibes.exceptions import PublishError, QuoteGenerationError
 from horrorvibes.orchestrator import (
+    _compute_quote_schedule,
     is_run_due,
     main_unattended,
     notify_failure,
@@ -111,6 +112,65 @@ def test_notify_failure_never_raises_on_runner_error():
         raise OSError("osascript not found")
 
     notify_failure("message", runner=fake_runner)  # should not raise
+
+
+# ---- _compute_quote_schedule ---------------------------------------------------
+
+
+def test_compute_quote_schedule_uses_nominal_duration_when_voiceover_disabled(config):
+    narrations = [None, None, None]
+    config = dataclasses.replace(config, run=dataclasses.replace(config.run, duration_per_quote_sec=10))
+
+    quote_durations, start_offsets, narration_durations = _compute_quote_schedule(config, narrations)
+
+    assert quote_durations == [10.0, 10.0, 10.0]
+    assert start_offsets == [0.0, 10.0, 20.0]
+    assert narration_durations == [None, None, None]
+
+
+def test_compute_quote_schedule_keeps_nominal_duration_for_short_narration(config, monkeypatch, tmp_path):
+    config = dataclasses.replace(config, run=dataclasses.replace(config.run, duration_per_quote_sec=10))
+    monkeypatch.setattr(voiceover, "narration_duration_sec", lambda path: 3.0)  # well under 10s
+
+    quote_durations, start_offsets, _ = _compute_quote_schedule(config, [tmp_path / "n1.mp3", None])
+
+    assert quote_durations == [10.0, 10.0]
+    assert start_offsets == [0.0, 10.0]
+
+
+def test_compute_quote_schedule_stretches_duration_for_long_narration(config, monkeypatch, tmp_path):
+    """Regression test: this is the actual overlap bug -- a quote whose
+    narration runs longer than duration_per_quote_sec must get a longer
+    on-screen slot (plus padding), so the *next* quote's narration doesn't
+    start until this one has actually finished."""
+    config = dataclasses.replace(
+        config,
+        run=dataclasses.replace(config.run, duration_per_quote_sec=10),
+        voiceover=dataclasses.replace(config.voiceover, narration_pad_sec=1.0),
+    )
+    durations_by_path = {"n1.mp3": 15.0, "n2.mp3": 4.0}
+    monkeypatch.setattr(voiceover, "narration_duration_sec", lambda path: durations_by_path[path.name])
+
+    quote_durations, start_offsets, narration_durations = _compute_quote_schedule(
+        config, [tmp_path / "n1.mp3", tmp_path / "n2.mp3"]
+    )
+
+    assert quote_durations == [16.0, 10.0]  # 15.0 + 1.0 pad, then back to nominal
+    assert start_offsets == [0.0, 16.0]  # second quote starts after the first's stretched slot
+    assert narration_durations == [15.0, 4.0]
+
+
+def test_compute_quote_schedule_treats_failed_narration_as_nominal_duration(config, monkeypatch, tmp_path):
+    config = dataclasses.replace(config, run=dataclasses.replace(config.run, duration_per_quote_sec=10))
+    monkeypatch.setattr(voiceover, "narration_duration_sec", lambda path: 15.0)
+
+    quote_durations, start_offsets, narration_durations = _compute_quote_schedule(
+        config, [None, tmp_path / "n2.mp3"]
+    )
+
+    assert quote_durations == [10.0, 16.0]
+    assert start_offsets == [0.0, 10.0]
+    assert narration_durations == [None, 15.0]
 
 
 # ---- run_pipeline --------------------------------------------------------------
@@ -250,18 +310,20 @@ def _mock_non_voiceover_stages(monkeypatch):
         ),
     )
     recorded_video_calls = []
+    recorded_durations = []
 
-    def fake_assemble_video(frame_paths, output_path, audio_path, duration_per_frame, fps, runner):
+    def fake_assemble_video(frame_paths, output_path, audio_path, durations_sec, fps, runner):
         recorded_video_calls.append(audio_path)
+        recorded_durations.append(durations_sec)
         return _write(output_path)
 
     monkeypatch.setattr(video, "assemble_video", fake_assemble_video)
-    return recorded_video_calls
+    return recorded_video_calls, recorded_durations
 
 
 def test_run_pipeline_uses_plain_music_when_voiceover_disabled(config, monkeypatch):
     chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
-    video_calls = _mock_non_voiceover_stages(monkeypatch)
+    video_calls, _video_durations = _mock_non_voiceover_stages(monkeypatch)
 
     def fail_if_called(*args, **kwargs):
         raise AssertionError("generate_narrations should not run when voiceover is disabled")
@@ -276,7 +338,7 @@ def test_run_pipeline_uses_plain_music_when_voiceover_disabled(config, monkeypat
 
 def test_run_pipeline_mixes_narration_when_voiceover_enabled(config, monkeypatch):
     chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
-    video_calls = _mock_non_voiceover_stages(monkeypatch)
+    video_calls, _video_durations = _mock_non_voiceover_stages(monkeypatch)
 
     monkeypatch.setattr(
         voiceover,
@@ -304,9 +366,54 @@ def test_run_pipeline_mixes_narration_when_voiceover_enabled(config, monkeypatch
     assert video_calls[0].name == "_music_with_narration.mp3"
 
 
+def test_run_pipeline_stretches_video_and_music_for_long_narration(config, monkeypatch):
+    """Regression test for the actual overlap bug end-to-end: a long
+    narration must stretch both the per-frame video durations passed to
+    video.assemble_video and the total duration_sec passed to
+    musicgen.generate_music -- not just the internal offset math."""
+    chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
+    _video_calls, video_durations = _mock_non_voiceover_stages(monkeypatch)
+
+    monkeypatch.setattr(
+        voiceover,
+        "generate_narrations",
+        lambda voiceover_cfg, quotes, output_dir, api_key=None, backend=None: [
+            _write(output_dir / "narration_1.mp3"),
+            _write(output_dir / "narration_2.mp3"),
+        ],
+    )
+    durations_by_name = {"narration_1.mp3": 15.0, "narration_2.mp3": 2.0}
+    monkeypatch.setattr(voiceover, "narration_duration_sec", lambda path: durations_by_name[path.name])
+
+    music_kwargs = {}
+
+    def fake_generate_music(cfg, output_path, **kwargs):
+        music_kwargs.update(kwargs)
+        return musicgen.MusicResult(path=_write(output_path), backend_used="curated_file")
+
+    monkeypatch.setattr(musicgen, "generate_music", fake_generate_music)
+
+    def fake_ffmpeg_run(cmd, capture_output=True, text=True, check=False):
+        Path(cmd[-1]).write_bytes(b"mixed")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr("horrorvibes.orchestrator.subprocess.run", fake_ffmpeg_run)
+
+    config = dataclasses.replace(
+        config,
+        run=dataclasses.replace(config.run, duration_per_quote_sec=10),
+        publish=dataclasses.replace(config.publish, youtube_upload=False),
+        voiceover=dataclasses.replace(config.voiceover, enabled=True, narration_pad_sec=1.0),
+    )
+    run_pipeline(config, chat_client)
+
+    assert video_durations[0] == [16.0, 10.0]  # 15.0 + 1.0 pad, then the second quote back to nominal
+    assert music_kwargs["duration_sec"] == 26.0  # 16.0 + 10.0 total, not the nominal 2 * 10 = 20
+
+
 def test_run_pipeline_falls_back_to_music_when_all_narrations_fail(config, monkeypatch, caplog):
     chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
-    video_calls = _mock_non_voiceover_stages(monkeypatch)
+    video_calls, _video_durations = _mock_non_voiceover_stages(monkeypatch)
 
     monkeypatch.setattr(
         voiceover,
@@ -328,7 +435,7 @@ def test_run_pipeline_falls_back_to_music_when_all_narrations_fail(config, monke
 
 def test_run_pipeline_falls_back_to_music_when_mix_ffmpeg_fails(config, monkeypatch, caplog):
     chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
-    video_calls = _mock_non_voiceover_stages(monkeypatch)
+    video_calls, _video_durations = _mock_non_voiceover_stages(monkeypatch)
 
     monkeypatch.setattr(
         voiceover,

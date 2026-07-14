@@ -21,16 +21,22 @@ logger = logging.getLogger(__name__)
 Runner = Callable[..., Any]
 
 
-def build_concat_file_content(frame_paths: list[Path], duration_per_frame: int) -> str:
-    """ffmpeg concat-demuxer file listing each frame with its display duration.
+def build_concat_file_content(frame_paths: list[Path], durations_sec: list[float]) -> str:
+    """ffmpeg concat-demuxer file listing each frame with its own display
+    duration -- frames aren't necessarily uniform length, e.g. a quote whose
+    narration runs long needs its frame held on screen longer so the next
+    quote's narration doesn't start before this one finishes.
 
     The last frame is repeated without a duration line, which the concat
     demuxer requires to know how long to hold the final frame.
     """
+    if len(frame_paths) != len(durations_sec):
+        raise ValueError("frame_paths and durations_sec must be the same length")
+
     lines = []
-    for path in frame_paths:
+    for path, duration_sec in zip(frame_paths, durations_sec):
         lines.append(f"file '{os.path.abspath(str(path))}'")
-        lines.append(f"duration {duration_per_frame}")
+        lines.append(f"duration {duration_sec}")
     if frame_paths:
         lines.append(f"file '{os.path.abspath(str(frame_paths[-1]))}'")
     return "\n".join(lines) + "\n"
@@ -72,7 +78,7 @@ def assemble_video(  # pylint: disable=too-many-locals
     frame_paths: list[Path],
     output_path: Path,
     audio_path: Path | None,
-    duration_per_frame: int,
+    durations_sec: list[float],
     fps: int,
     runner: Runner,
 ) -> Path:
@@ -84,7 +90,7 @@ def assemble_video(  # pylint: disable=too-many-locals
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_dir_path = Path(temp_dir)
         concat_file = temp_dir_path / "concat.txt"
-        concat_file.write_text(build_concat_file_content(frame_paths, duration_per_frame), encoding="utf-8")
+        concat_file.write_text(build_concat_file_content(frame_paths, durations_sec), encoding="utf-8")
 
         silent_path = temp_dir_path / "silent.mp4"
         silent_cmd = build_silent_video_cmd(concat_file, silent_path, fps)

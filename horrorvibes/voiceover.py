@@ -121,22 +121,23 @@ def narration_duration_sec(narration_path: Path) -> float:
 
 def build_ducked_mix_cmd(  # pylint: disable=too-many-locals
     music_path: Path,
-    narration_entries: list[tuple[int, Path, float]],
-    duration_per_quote_sec: float,
+    narration_entries: list[tuple[float, Path, float]],
     voiceover_config: VoiceoverConfig,
     output_path: Path,
 ) -> list[str]:
-    """ffmpeg argv: boost and delay each narration clip to its quote's start
-    time, duck the music at those exact known windows, then mix. Ducking is
-    a plain ``volume`` filter enabled only during each narration's actual
-    [start, start+duration] window -- deterministic, unlike sidechain
-    compression, which depends on calibrating a threshold against signal
-    levels that vary per voice/track.
+    """ffmpeg argv: boost and delay each narration clip to its quote's actual
+    start time, duck the music at those exact known windows, then mix.
+    Ducking is a plain ``volume`` filter enabled only during each
+    narration's actual [start, start+duration] window -- deterministic,
+    unlike sidechain compression, which depends on calibrating a threshold
+    against signal levels that vary per voice/track.
 
-    ``narration_entries`` is (quote_index, path, duration_sec) for quotes
-    whose narration succeeded -- quote_index (not list position) drives
-    the delay, so gaps from failed quotes don't shift later narration out
-    of sync.
+    ``narration_entries`` is (start_sec, path, duration_sec) for quotes
+    whose narration succeeded. The caller computes ``start_sec`` from each
+    quote's actual on-screen duration (which may run longer than the
+    nominal per-quote duration to fit a long narration) -- not simply
+    ``quote_index * duration_per_quote_sec``, which would let one quote's
+    narration bleed into the next's.
     """
     if not narration_entries:
         raise ValueError("build_ducked_mix_cmd requires at least one narration entry")
@@ -144,9 +145,8 @@ def build_ducked_mix_cmd(  # pylint: disable=too-many-locals
     inputs = ["-i", str(music_path)]
     delay_labels = []
     duck_windows = []
-    for position, (quote_index, narration_path, duration_sec) in enumerate(narration_entries, start=1):
+    for position, (start_sec, narration_path, duration_sec) in enumerate(narration_entries, start=1):
         inputs.extend(["-i", str(narration_path)])
-        start_sec = quote_index * duration_per_quote_sec
         delay_ms = int(start_sec * 1000)
         delay_labels.append((position, f"d{position}", delay_ms))
         duck_windows.append((start_sec, start_sec + duration_sec))

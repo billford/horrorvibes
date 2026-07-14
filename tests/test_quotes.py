@@ -39,7 +39,7 @@ class FakeChatClient:
 
 @pytest.fixture
 def quotes_config():
-    return QuotesConfig(model="gpt-4", max_attempts=3, themes=["classic horror"])
+    return QuotesConfig(model="gpt-4", max_attempts=3, temperature=0.7, themes=["classic horror"])
 
 
 def test_normalize_quote_strips_case_and_quote_chars():

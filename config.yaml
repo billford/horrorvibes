@@ -16,6 +16,9 @@ run:
 quotes:
   model: gpt-4
   max_attempts: 5
+  # Lower than the API default (1.0) -- favors accurate attribution over
+  # creative invention. See quotes.build_quote_request for the full reasoning.
+  temperature: 0.7
   themes:
     - classic horror
     - modern horror
@@ -81,8 +84,11 @@ voiceover:
   retry_backoff_sec: 5
   # Music volume during each narration's exact window (linear, 0-1), and a
   # gain boost applied to narration so it isn't buried under the music bed.
-  duck_volume: 0.15
+  duck_volume: 0.3
   narration_gain: 1.6
+  # Extra seconds a quote stays on screen past its narration's own length, so
+  # the next quote's narration never starts before this one has finished.
+  narration_pad_sec: 1.0
 
 compositor:
   font_paths:

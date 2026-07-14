@@ -38,10 +38,14 @@ class MusicResult:
     backend_used: str
 
 
+def clamp_duration_ms(duration_ms: float) -> int:
+    """Clamp a duration in milliseconds to the API's allowed [3s, 600s] range."""
+    return int(max(3_000, min(duration_ms, 600_000)))
+
+
 def compute_duration_ms(quote_count: int, duration_per_quote_sec: int) -> int:
     """Total video duration in milliseconds, clamped to the API's allowed range."""
-    duration_ms = quote_count * duration_per_quote_sec * 1000
-    return max(3_000, min(duration_ms, 600_000))
+    return clamp_duration_ms(quote_count * duration_per_quote_sec * 1000)
 
 
 def build_music_prompt(
@@ -330,15 +334,24 @@ def generate_music(
     api_key: str | None = None,
     backends: dict[str, Callable[[str, int, Path], None]] | None = None,
     rng: random.Random | None = None,
+    duration_sec: float | None = None,
 ) -> MusicResult:
-    """Generate (or fetch a fallback for) the run's background music track."""
+    """Generate (or fetch a fallback for) the run's background music track.
+
+    ``duration_sec``, if given, overrides the nominal quote_count *
+    duration_per_quote_sec duration -- used when voiceover narration has
+    stretched the actual video length beyond the nominal one.
+    """
     backends = backends if backends is not None else default_backends(config, api_key)
     chain = _BACKEND_CHAIN[config.music.backend]
 
     prompt = build_music_prompt(
         config.music.mood_anchor, config.music.mood_pool, config.music.mood_pool_sample_size, rng
     )
-    duration_ms = compute_duration_ms(config.run.quote_count, config.run.duration_per_quote_sec)
+    if duration_sec is not None:
+        duration_ms = clamp_duration_ms(duration_sec * 1000)
+    else:
+        duration_ms = compute_duration_ms(config.run.quote_count, config.run.duration_per_quote_sec)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 

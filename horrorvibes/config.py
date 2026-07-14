@@ -37,6 +37,10 @@ DEFAULTS: dict[str, Any] = {
     "quotes": {
         "model": "gpt-4",
         "max_attempts": 5,
+        # Lower than the API default (1.0) -- favors the model's actual training
+        # data over creative invention, since a wrong-but-plausible quote or a
+        # misattributed movie title is worse than a slightly less varied one.
+        "temperature": 0.7,
         "themes": [
             "classic horror",
             "modern horror",
@@ -106,15 +110,19 @@ DEFAULTS: dict[str, Any] = {
         "similarity_boost": 0.75,
         "style": 0.3,
         "use_speaker_boost": True,
-        "speed": 0.9,
+        "speed": 0.75,  # slower, more menacing delivery -- 0.7 is ElevenLabs' floor before quality degrades
         "api_timeout_sec": 60,
         "max_retries": 3,
         "retry_backoff_sec": 5,
         # Music volume during each narration's exact window (linear, 0-1) and
         # narration's own gain boost -- see voiceover.py for why this replaced
         # a sidechaincompress-based approach.
-        "duck_volume": 0.15,
+        "duck_volume": 0.3,
         "narration_gain": 1.6,
+        # Extra seconds a quote stays on screen past its narration's own
+        # length, so the next quote's narration never starts before this
+        # one has actually finished.
+        "narration_pad_sec": 1.0,
     },
     "logging": {
         "level": "INFO",
@@ -161,6 +169,7 @@ class QuotesConfig:
 
     model: str
     max_attempts: int
+    temperature: float
     themes: list[str]
 
 
@@ -239,6 +248,7 @@ class VoiceoverConfig:
     retry_backoff_sec: int
     duck_volume: float
     narration_gain: float
+    narration_pad_sec: float
 
 
 @dataclass(frozen=True)
@@ -346,6 +356,7 @@ def load_config(path: str | Path) -> Config:
         quotes=QuotesConfig(
             model=merged["quotes"]["model"],
             max_attempts=int(merged["quotes"]["max_attempts"]),
+            temperature=float(merged["quotes"]["temperature"]),
             themes=list(merged["quotes"]["themes"]),
         ),
         image=ImageConfig(
@@ -404,6 +415,7 @@ def load_config(path: str | Path) -> Config:
             retry_backoff_sec=int(merged["voiceover"]["retry_backoff_sec"]),
             duck_volume=float(merged["voiceover"]["duck_volume"]),
             narration_gain=float(merged["voiceover"]["narration_gain"]),
+            narration_pad_sec=float(merged["voiceover"]["narration_pad_sec"]),
         ),
         logging=LoggingConfig(
             level=merged["logging"]["level"].upper(),

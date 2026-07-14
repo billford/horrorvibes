@@ -13,6 +13,7 @@ from horrorvibes.musicgen import (
     build_crossfade_filter,
     build_music_assembly_cmd,
     build_music_prompt,
+    clamp_duration_ms,
     compute_duration_ms,
     generate_music,
     plan_segment_count,
@@ -39,6 +40,38 @@ def with_backend(config, backend):
 )
 def test_compute_duration_ms_clamps_to_api_bounds(quote_count, duration_per_quote, expected_ms):
     assert compute_duration_ms(quote_count, duration_per_quote) == expected_ms
+
+
+@pytest.mark.parametrize(
+    "duration_ms,expected",
+    [
+        (120_000, 120_000),
+        (500, 3_000),  # clamped up to the API's 3s minimum
+        (700_000, 600_000),  # clamped down to the API's 10min maximum
+    ],
+)
+def test_clamp_duration_ms(duration_ms, expected):
+    assert clamp_duration_ms(duration_ms) == expected
+
+
+def test_generate_music_duration_sec_override_takes_precedence(config, tmp_path):
+    """Regression test: when voiceover narration stretches the actual video
+    length, generate_music must use that real duration, not silently fall
+    back to quote_count * duration_per_quote_sec."""
+    received = {}
+
+    def fake_backend(prompt, duration_ms, output_path):
+        received["duration_ms"] = duration_ms
+        output_path.write_bytes(b"music")
+
+    generate_music(
+        with_backend(config, "curated_file"),
+        tmp_path / "music.mp3",
+        backends={"curated_file": fake_backend},
+        duration_sec=26.0,
+    )
+
+    assert received["duration_ms"] == 26_000
 
 
 def test_build_music_prompt_includes_anchor_and_sampled_descriptors():

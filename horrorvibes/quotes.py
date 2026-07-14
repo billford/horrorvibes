@@ -69,16 +69,28 @@ def build_quote_request(
         "Provide authentic, memorable quotes from horror films. "
         "Include only the quote and the movie title. "
         "Format as: 'QUOTE' - MOVIE TITLE (YEAR). "
-        "Ensure each quote is unique and different from any you've provided before."
+        "Accuracy matters more than novelty: only provide a quote if you are highly "
+        "confident it is word-for-word accurate and correctly attributed to that "
+        "exact film. Never paraphrase, invent, or guess a plausible-sounding quote, "
+        "and never guess at a title/year you are not sure of. If you are not certain "
+        "a quote is accurate and correctly attributed, choose a different, "
+        "well-documented quote instead. Ensure each quote is unique and different "
+        "from any you've provided before."
     )
     user_prompt = (
         f"Provide {remaining} different, authentic horror movie quotes focusing on "
         f"{theme}. Choose quotes that are impactful, memorable, and would look good "
         f"on a dramatic background. Random seed: {seed}, timestamp: {timestamp}. "
-        "Make sure these are completely different from typical horror quotes and "
-        "avoid common, overused lines."
+        "Prefer variety over repeating the most famous lines, but never at the cost "
+        "of accuracy -- do not invent a quote or misattribute one just to seem less "
+        "common."
     )
-    return QuoteRequest(model=quotes_config.model, system_prompt=system_prompt, user_prompt=user_prompt)
+    return QuoteRequest(
+        model=quotes_config.model,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=quotes_config.temperature,
+    )
 
 
 def _call_chat_client(client: ChatClient, request: QuoteRequest) -> str:

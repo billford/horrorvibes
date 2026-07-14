@@ -76,6 +76,18 @@ python3 run.py                # full pipeline, uploads to YouTube if publish.you
 Everything else (image/music backends, prompts, fonts, privacy status, logging, cadence) lives in
 `config.yaml` -- see `config.sample.yaml` for the full annotated list of settings.
 
+## Quote accuracy
+
+Quote generation still goes through the same OpenAI chat model as v1 (see Non-Goals) -- what changed is the
+prompt and `quotes.temperature` (0.7, down from the API's 1.0 default). A chat model asked for "impactful,
+unique, non-overused" horror quotes at high temperature has real incentive to invent a plausible-sounding
+line or misattribute a real one to the wrong film. The system prompt now explicitly tells the model accuracy
+matters more than novelty, and to pick a different, well-documented quote rather than guess at one it isn't
+confident about; the lower temperature makes it lean on what it actually knows rather than get creative. This
+narrows but doesn't eliminate the risk -- there's no external quote database cross-check here, so a wrong
+attribution is still possible. `quotes.py`'s history/dedup file gives you a durable record of exactly what was
+generated per run if you want to spot-check attributions after the fact.
+
 ## Image generation
 
 `image.backend` in config.yaml picks where the fallback chain *starts*; it always continues
@@ -156,13 +168,27 @@ narration plays, ducking those known windows directly is simpler and actually re
   whichever music backend you're using, not a separate subscription.
 - Tunable via `voiceover.duck_volume` (music's linear volume, 0-1, during narration) and
   `voiceover.narration_gain` (narration's own volume boost) if the default mix doesn't sit right for your
-  content.
+  content. `voiceover.speed` (ElevenLabs' 0.7-1.2 range) controls delivery pace -- defaults to 0.75 for a
+  slower, more menacing read.
+
+**Quotes don't overlap, even with slow narration**: each quote's on-screen duration stretches to fit its own
+narration length (plus `voiceover.narration_pad_sec`, default 1s of breathing room) if that narration runs
+longer than the nominal `run.duration_per_quote_sec` -- a real bug caught by an actual full run: every quote
+got a fixed-length slot regardless of how long its narration actually took to say, so a long narration
+(especially at a slower `voiceover.speed`) bled into the next quote's. `orchestrator._compute_quote_schedule`
+computes each quote's actual duration and cumulative start offset up front; those flow through to the video's
+per-frame timing (`video.assemble_video` takes a duration *per frame*, not one uniform value), the ducked
+mix's narration placement, and the music track's total generated length (`musicgen.generate_music`'s
+`duration_sec` override) so nothing is sized to the old nominal total once narration has stretched it.
 
 **Testing**: `tests/test_voiceover.py` covers the ducked-mix `ffmpeg` command construction (single- and
-multi-narration cases, delay offsets keyed to each quote's actual index so failed quotes don't shift later
-ones out of sync) and per-quote fallback behavior -- all with fakes, no real network calls. `orchestrator.py`
-falls back to the plain music track if voiceover is disabled, every narration fails, or the mix step itself
-fails, all covered in `tests/test_orchestrator.py`.
+multi-narration cases, using each narration's actual computed start offset, not a fixed
+`quote_index * duration_per_quote_sec` slot) and per-quote fallback behavior. `tests/test_orchestrator.py`
+covers the schedule computation directly (nominal duration, short narration, long narration stretching a
+slot, a failed narration falling back to nominal) plus an end-to-end regression test asserting the stretched
+durations actually reach `video.assemble_video` and `musicgen.generate_music`. All with fakes, no real
+network calls, model inference, or `ffmpeg` invocations. `orchestrator.py` falls back to the plain music
+track if voiceover is disabled, every narration fails, or the mix step itself fails, also covered.
 
 ## Unattended YouTube upload
 

@@ -17,7 +17,7 @@ from horrorvibes.video import (
 
 def test_build_concat_file_content_repeats_last_frame_without_duration():
     frames = [Path("/tmp/a.png"), Path("/tmp/b.png")]
-    content = build_concat_file_content(frames, duration_per_frame=10)
+    content = build_concat_file_content(frames, [10, 10])
     lines = content.splitlines()
 
     abs_a = os.path.abspath("/tmp/a.png")
@@ -31,8 +31,22 @@ def test_build_concat_file_content_repeats_last_frame_without_duration():
     ]
 
 
+def test_build_concat_file_content_supports_per_frame_durations():
+    frames = [Path("/tmp/a.png"), Path("/tmp/b.png")]
+    content = build_concat_file_content(frames, [10, 15.5])
+    lines = content.splitlines()
+
+    assert "duration 10" in lines
+    assert "duration 15.5" in lines
+
+
 def test_build_concat_file_content_empty_frames():
-    assert build_concat_file_content([], duration_per_frame=10) == "\n"
+    assert build_concat_file_content([], []) == "\n"
+
+
+def test_build_concat_file_content_raises_on_length_mismatch():
+    with pytest.raises(ValueError):
+        build_concat_file_content([Path("/tmp/a.png")], [10, 20])
 
 
 def test_build_silent_video_cmd_has_no_shell_and_uses_concat_demuxer():
@@ -71,7 +85,7 @@ def test_assemble_video_success_with_audio(tmp_path):
     output_path = tmp_path / "out.mp4"
 
     runner = FakeRunner([(0, b"silent-video"), (0, b"muxed-video")])
-    result = assemble_video([frame], output_path, audio, duration_per_frame=10, fps=30, runner=runner)
+    result = assemble_video([frame], output_path, audio, [10], fps=30, runner=runner)
 
     assert result == output_path
     assert output_path.read_bytes() == b"muxed-video"
@@ -85,7 +99,7 @@ def test_assemble_video_without_audio_only_builds_silent_video(tmp_path):
     output_path = tmp_path / "out.mp4"
 
     runner = FakeRunner([(0, b"silent-video")])
-    result = assemble_video([frame], output_path, None, duration_per_frame=10, fps=30, runner=runner)
+    result = assemble_video([frame], output_path, None, [10], fps=30, runner=runner)
 
     assert result.read_bytes() == b"silent-video"
     assert len(runner.calls) == 1
@@ -98,7 +112,7 @@ def test_assemble_video_raises_when_silent_video_step_fails(tmp_path):
 
     runner = FakeRunner([(1, None)])
     with pytest.raises(VideoAssemblyError):
-        assemble_video([frame], output_path, None, duration_per_frame=10, fps=30, runner=runner)
+        assemble_video([frame], output_path, None, [10], fps=30, runner=runner)
 
 
 def test_assemble_video_falls_back_to_silent_video_when_mux_fails(tmp_path, caplog):
@@ -110,7 +124,7 @@ def test_assemble_video_falls_back_to_silent_video_when_mux_fails(tmp_path, capl
 
     runner = FakeRunner([(0, b"silent-video"), (1, None)])
     with caplog.at_level("WARNING"):
-        result = assemble_video([frame], output_path, audio, duration_per_frame=10, fps=30, runner=runner)
+        result = assemble_video([frame], output_path, audio, [10], fps=30, runner=runner)
 
     assert result.read_bytes() == b"silent-video"
     assert any("mux" in record.message.lower() for record in caplog.records)
@@ -119,5 +133,5 @@ def test_assemble_video_falls_back_to_silent_video_when_mux_fails(tmp_path, capl
 def test_assemble_video_raises_on_empty_frame_list(tmp_path):
     runner = FakeRunner([])
     with pytest.raises(VideoAssemblyError):
-        assemble_video([], tmp_path / "out.mp4", None, duration_per_frame=10, fps=30, runner=runner)
+        assemble_video([], tmp_path / "out.mp4", None, [], fps=30, runner=runner)
     assert runner.calls == []

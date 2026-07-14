@@ -84,31 +84,66 @@ def setup_directories(config: Config) -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
 
+def _generate_narrations_if_enabled(
+    config: Config, generated_quotes: list[str], elevenlabs_api_key: str | None
+) -> list[Path | None]:
+    if not config.voiceover.enabled:
+        return [None] * len(generated_quotes)
+    narration_dir = config.run.output_dir / "narration"
+    return voiceover.generate_narrations(
+        config.voiceover, generated_quotes, narration_dir, api_key=elevenlabs_api_key
+    )
+
+
+def _compute_quote_schedule(
+    config: Config, narrations: list[Path | None]
+) -> tuple[list[float], list[float], list[float | None]]:
+    """Each quote's on-screen duration, its start offset in the final
+    timeline, and its narration's own duration (or None). A quote whose
+    narration runs longer than the nominal duration_per_quote_sec gets a
+    longer on-screen duration (plus a pad) so the next quote's narration
+    never starts before this one has actually finished."""
+    narration_durations = [voiceover.narration_duration_sec(p) if p is not None else None for p in narrations]
+
+    quote_durations = [
+        max(config.run.duration_per_quote_sec, duration + config.voiceover.narration_pad_sec)
+        if duration is not None
+        else float(config.run.duration_per_quote_sec)
+        for duration in narration_durations
+    ]
+
+    start_offsets = []
+    cursor = 0.0
+    for duration in quote_durations:
+        start_offsets.append(cursor)
+        cursor += duration
+
+    return quote_durations, start_offsets, narration_durations
+
+
 def _build_final_audio_track(
-    config: Config, generated_quotes: list[str], music_path: Path, elevenlabs_api_key: str | None
+    config: Config,
+    music_path: Path,
+    narrations: list[Path | None],
+    narration_durations: list[float | None],
+    start_offsets: list[float],
 ) -> Path:
     """Music alone, or music ducked under per-quote narration if
     voiceover.enabled and at least one quote's narration succeeded."""
     if not config.voiceover.enabled:
         return music_path
 
-    narration_dir = config.run.output_dir / "narration"
-    narrations = voiceover.generate_narrations(
-        config.voiceover, generated_quotes, narration_dir, api_key=elevenlabs_api_key
-    )
     narration_entries = [
-        (i, path, voiceover.narration_duration_sec(path))
-        for i, path in enumerate(narrations)
-        if path is not None
+        (start_offsets[i], narrations[i], narration_durations[i])
+        for i in range(len(narrations))
+        if narrations[i] is not None
     ]
     if not narration_entries:
         logger.warning("Voiceover enabled but every quote's narration failed; using music track as-is")
         return music_path
 
     mixed_path = config.run.output_dir / "_music_with_narration.mp3"
-    cmd = voiceover.build_ducked_mix_cmd(
-        music_path, narration_entries, config.run.duration_per_quote_sec, config.voiceover, mixed_path
-    )
+    cmd = voiceover.build_ducked_mix_cmd(music_path, narration_entries, config.voiceover, mixed_path)
     # nosec B603 - no shell=True; argv is built by build_ducked_mix_cmd, not user input
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # nosec B603
     if result.returncode != 0:
@@ -118,7 +153,7 @@ def _build_final_audio_track(
     logger.info(
         "Mixed narration for %d/%d quotes into the music track",
         len(narration_entries),
-        len(generated_quotes),
+        len(narrations),
     )
     return mixed_path
 
@@ -142,6 +177,9 @@ def run_pipeline(  # pylint: disable=too-many-locals
     quotes.append_quote_history(config.run.quotes_history_path, generated_quotes)
     logger.info("Generated %d quotes", len(generated_quotes))
 
+    narrations = _generate_narrations_if_enabled(config, generated_quotes, elevenlabs_api_key)
+    quote_durations, start_offsets, narration_durations = _compute_quote_schedule(config, narrations)
+
     image_backends = imagegen.default_backends(config)
     frame_paths = []
     for i, quote_text in enumerate(generated_quotes):
@@ -155,12 +193,15 @@ def run_pipeline(  # pylint: disable=too-many-locals
         frame_paths.append(frame_path)
     logger.info("Composed %d frames", len(frame_paths))
 
+    total_duration_sec = start_offsets[-1] + quote_durations[-1] if quote_durations else 0.0
     music_path = config.run.output_dir / "_music.mp3"
-    music_result = musicgen.generate_music(config, music_path, api_key=elevenlabs_api_key)
+    music_result = musicgen.generate_music(
+        config, music_path, api_key=elevenlabs_api_key, duration_sec=total_duration_sec
+    )
     logger.info("Music ready via %r backend", music_result.backend_used)
 
     final_audio_path = _build_final_audio_track(
-        config, generated_quotes, music_result.path, elevenlabs_api_key
+        config, music_result.path, narrations, narration_durations, start_offsets
     )
 
     timestamp = now().strftime("%Y%m%d_%H%M%S")
@@ -170,7 +211,7 @@ def run_pipeline(  # pylint: disable=too-many-locals
         frame_paths,
         output_path,
         final_audio_path,
-        config.run.duration_per_quote_sec,
+        quote_durations,
         config.run.fps,
         runner=subprocess.run,
     )

@@ -91,20 +91,19 @@ def test_generate_narrations_skips_failed_quotes_without_raising(tmp_path, voice
     assert any("Narration failed" in r.message for r in caplog.records)
 
 
-def test_build_ducked_mix_cmd_single_entry_uses_delay_and_window_from_quote_index(tmp_path, voiceover_config):
+def test_build_ducked_mix_cmd_single_entry_uses_explicit_start_offset(tmp_path, voiceover_config):
     narration_path = tmp_path / "narration_3.mp3"
 
     cmd = build_ducked_mix_cmd(
         tmp_path / "music.mp3",
-        [(2, narration_path, 3.5)],  # quote index 2, not list position 0; 3.5s long
-        duration_per_quote_sec=10,
+        [(20.0, narration_path, 3.5)],  # explicit start offset (e.g. a stretched earlier quote), 3.5s long
         voiceover_config=voiceover_config,
         output_path=tmp_path / "out.mp3",
     )
 
     filter_complex = cmd[cmd.index("-filter_complex") + 1]
     assert "adelay=20000|20000" in filter_complex
-    assert "between(t,20,23.5)" in filter_complex
+    assert "between(t,20.0,23.5)" in filter_complex
     assert f"volume={voiceover_config.duck_volume}" in filter_complex
     assert f"volume={voiceover_config.narration_gain}" in filter_complex
     assert "sidechaincompress" not in filter_complex
@@ -114,8 +113,7 @@ def test_build_ducked_mix_cmd_single_entry_uses_delay_and_window_from_quote_inde
 def test_build_ducked_mix_cmd_multi_entry_mixes_narrations_before_ducking(tmp_path, voiceover_config):
     cmd = build_ducked_mix_cmd(
         tmp_path / "music.mp3",
-        [(0, tmp_path / "n1.mp3", 2.0), (5, tmp_path / "n2.mp3", 4.0)],
-        duration_per_quote_sec=10,
+        [(0.0, tmp_path / "n1.mp3", 2.0), (50.0, tmp_path / "n2.mp3", 4.0)],
         voiceover_config=voiceover_config,
         output_path=tmp_path / "out.mp3",
     )
@@ -123,17 +121,32 @@ def test_build_ducked_mix_cmd_multi_entry_mixes_narrations_before_ducking(tmp_pa
     filter_complex = cmd[cmd.index("-filter_complex") + 1]
     assert "adelay=0|0" in filter_complex
     assert "adelay=50000|50000" in filter_complex
-    assert "between(t,0,2.0)" in filter_complex
-    assert "between(t,50,54.0)" in filter_complex
+    assert "between(t,0.0,2.0)" in filter_complex
+    assert "between(t,50.0,54.0)" in filter_complex
     assert "amix=inputs=2:normalize=0[narrmix]" in filter_complex
     assert "[narrmix]" in filter_complex
+
+
+def test_build_ducked_mix_cmd_uses_actual_offset_not_a_fixed_slot(tmp_path, voiceover_config):
+    """Regression test: a quote stretched by a prior long narration must
+    use its real cumulative start time, not quote_index * a fixed slot
+    duration -- that's exactly what caused narration to overlap."""
+    cmd = build_ducked_mix_cmd(
+        tmp_path / "music.mp3",
+        [(0.0, tmp_path / "n1.mp3", 15.0), (16.0, tmp_path / "n2.mp3", 2.0)],
+        voiceover_config=voiceover_config,
+        output_path=tmp_path / "out.mp3",
+    )
+
+    filter_complex = cmd[cmd.index("-filter_complex") + 1]
+    assert "adelay=16000|16000" in filter_complex
+    assert "between(t,16.0,18.0)" in filter_complex
 
 
 def test_build_ducked_mix_cmd_raises_on_empty_entries(tmp_path, voiceover_config):
     with pytest.raises(ValueError):
         build_ducked_mix_cmd(
-            tmp_path / "music.mp3", [], duration_per_quote_sec=10, voiceover_config=voiceover_config,
-            output_path=tmp_path / "out.mp3",
+            tmp_path / "music.mp3", [], voiceover_config=voiceover_config, output_path=tmp_path / "out.mp3"
         )
 
 
