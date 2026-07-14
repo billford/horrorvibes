@@ -46,6 +46,28 @@ def test_invalid_values_raise_config_error(tmp_path, override, message_fragment)
         load_config(path)
 
 
+def test_local_is_a_valid_music_backend(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text("music:\n  backend: local\n", encoding="utf-8")
+
+    config = load_config(path)
+
+    assert config.music.backend == "local"
+    assert config.music.local_model == "stabilityai/stable-audio-open-1.0"
+
+
+def test_local_crossfade_must_be_shorter_than_segment(tmp_path):
+    import yaml
+
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        yaml.safe_dump({"music": {"local_segment_sec": 10, "local_crossfade_sec": 10}}), encoding="utf-8"
+    )
+
+    with pytest.raises(ConfigError, match="local_crossfade_sec"):
+        load_config(path)
+
+
 def test_mood_pool_sample_size_cannot_exceed_pool(tmp_path):
     import yaml
 

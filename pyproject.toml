@@ -27,7 +27,7 @@ max-line-length = 110
 [tool.pylint.design]
 max-args = 10
 max-positional-arguments = 10
-max-attributes = 10
+max-attributes = 16
 
 [tool.pylint.basic]
 good-names = ["i", "x", "y", "r", "g", "b", "fd"]

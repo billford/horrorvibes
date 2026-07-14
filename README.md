@@ -14,9 +14,9 @@ but is superseded by the `horrorvibes/` package described below.
 - **Backgrounds**: gradient fills -> locally-generated Stable Diffusion images (Apple Silicon, via `diffusers`
   on the `mps` backend), with automatic fallback to the OpenAI Images API, then to the old gradient generator
   as a last resort. Every image's actual source backend is logged.
-- **Music**: static file picker from `./audio` -> AI-generated meditative horror ambient music per run via the
-  ElevenLabs Music API, one call sized to the whole video (not per-quote), with automatic fallback to a random
-  curated file from `./audio` if the API call fails.
+- **Music**: static file picker from `./audio` -> AI-generated meditative horror ambient music per run, either
+  locally via Stable Audio Open or via the ElevenLabs Music API (your choice, each falls back to the other),
+  sized to the whole video (not per-quote), with a random curated file from `./audio` as the final fallback.
 - **Config**: CLI flags only -> `config.yaml` (see `config.sample.yaml`). The CLI now only exposes `--quotes`,
   `--dry-run`, `--force`, and `--config`.
 - **Code**: one 870-line script -> a modular package (`horrorvibes/`) with typed exceptions instead of
@@ -48,9 +48,10 @@ inference, no real uploads run in CI).
 - Python 3.11+
 - FFmpeg (for video assembly) -- install separately, see `INSTALL.md`
 - An OpenAI API key (quote generation, and the image-fallback path)
-- An ElevenLabs API key, if using `music.backend: elevenlabs` (see **Costs** below)
-- ~64GB RAM recommended for local SDXL-class image generation (developed against an M1 Ultra Mac Studio);
-  a smaller/faster checkpoint or the `openai`/`gradient` image backends work fine on lighter hardware too
+- An ElevenLabs API key, if using `music.backend: elevenlabs` (see **Music generation** below for costs)
+- ~64GB RAM recommended for local SDXL-class image generation and/or local Stable Audio Open music generation
+  (developed against an M1 Ultra Mac Studio); lighter hardware can fall back to the `openai`/`gradient` image
+  backends and the `elevenlabs`/`curated_file` music backends instead
 
 ## Quick Start
 
@@ -97,22 +98,41 @@ eyeball actual output quality/timing after changing the model or prompt.
 
 ## Music generation
 
-`music.backend: elevenlabs` calls the [ElevenLabs Music API](https://elevenlabs.io/docs/api-reference/music)
-once per run, sized to the whole video's duration, with a prompt built from a fixed anchor phrase (keeps the
-mood consistent run-to-run) plus a random subset of mood descriptors from `music.mood_pool` (varies the
-texture). If the API call fails after retries, it falls back to picking a random file from `music.fallback_dir`
-(default `./audio`) -- logged as a warning, since a silently-degraded "generated" track that's actually last
-year's MP3 again is exactly the kind of thing that should show up in logs.
+`music.backend` in config.yaml picks where the fallback chain *starts* -- `local` or `elevenlabs` -- and it
+always falls through to the other AI backend before giving up and using a random curated file from
+`music.fallback_dir` (default `./audio`) as the last resort. Every fallback is logged as a warning, since a
+silently-degraded "generated" track that's actually last year's MP3 again is exactly the kind of thing that
+should show up in logs, not just in output. Both AI backends share the same prompt: a fixed anchor phrase
+(keeps the mood consistent run-to-run) plus a random subset of mood descriptors from `music.mood_pool` (varies
+the texture).
 
-**Costs (this is new spend, not a repurposed existing subscription)**: as of this writing, ElevenLabs
-Music is priced at **$0.15/minute**. At 12 quotes x 10s = 120s (2 minutes) per video, and roughly 15 runs/month
-on an every-other-day cadence, that's about **$4.50/month**. Confirm current pricing at
-https://elevenlabs.io/pricing/api before enabling this, since API pricing changes -- you'll also need a
-separate `ELEVENLABS_API_KEY`.
+**Local (`music.backend: local`)**: [Stable Audio Open](https://huggingface.co/stabilityai/stable-audio-open-1.0)
+via `diffusers`, same pattern as the local image backend -- free, runs on the M1 Ultra's `mps` backend. It's
+purpose-built for ambient/sound-design audio rather than structured songs, which fits "meditative horror
+ambient" well. The model natively caps out at well under a full run's duration, so `LocalMusicBackend`
+generates several `music.local_segment_sec`-long segments and crossfades them together with `ffmpeg`
+(`music.local_crossfade_sec` overlap) to reach the target length -- seamless for continuous drone/ambient
+texture, which is the only kind of output this prompt asks for.
 
-**Testing**: `tests/test_musicgen.py` covers duration math, prompt-pool sampling, retry/backoff, and the
-fallback chain -- all with a fake HTTP session, no real network calls. Use
-`python3 scripts/smoke_test_musicgen.py` to manually generate one real track.
+**ElevenLabs (`music.backend: elevenlabs`)**: calls the
+[ElevenLabs Music API](https://elevenlabs.io/docs/api-reference/music) once per run, sized to the whole
+video's duration. **Costs real money, not a repurposed existing subscription**: as of this writing, priced at
+**$0.15/minute** (~900 credits/minute on subscription plans). At 12 quotes x 10s = 120s (2 minutes) per video,
+and roughly 15 runs/month on an every-other-day cadence, that's about **$4.50/month**, or ~27,000 credits/month
+-- confirm current pricing at https://elevenlabs.io/pricing/api before enabling this. You'll need a separate
+`ELEVENLABS_API_KEY`, and note that ElevenLabs lets you cap an individual key's own credit quota separately
+from your account's overall balance (a useful blast-radius limit, but easy to forget you set it to 0 on a
+freshly-created key -- check the key's own limit in the dashboard if you get a `quota_exceeded` 401 despite
+having account credits).
+
+**Which one should be primary?** That's a call worth making by ear -- generate a track from each
+(`scripts/smoke_test_musicgen.py` after toggling `music.backend`) and listen for which one actually sounds
+scarier/better for your videos before deciding. Either way the other one covers for it automatically.
+
+**Testing**: `tests/test_musicgen.py` covers duration math, prompt-pool sampling, retry/backoff, segment/
+crossfade planning, and fallback ordering for both chain directions -- all with fakes, no real network calls
+or model inference. Use `python3 scripts/smoke_test_musicgen.py` to manually generate one real track with
+whatever `music.backend` is currently set.
 
 ## Unattended YouTube upload
 

@@ -17,7 +17,7 @@ import yaml
 from horrorvibes.exceptions import ConfigError
 
 VALID_IMAGE_BACKENDS = {"local_sd", "openai", "gradient"}
-VALID_MUSIC_BACKENDS = {"elevenlabs", "curated_file"}
+VALID_MUSIC_BACKENDS = {"local", "elevenlabs", "curated_file"}
 VALID_PRIVACY_STATUSES = {"private", "unlisted", "public"}
 VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
@@ -72,6 +72,12 @@ DEFAULTS: dict[str, Any] = {
         "max_retries": 3,
         "retry_backoff_sec": 5,
         "fallback_dir": "./audio",
+        "local_model": "stabilityai/stable-audio-open-1.0",
+        "local_device": "mps",
+        "local_steps": 100,
+        "local_segment_sec": 40,
+        "local_crossfade_sec": 3,
+        "local_negative_prompt": "vocals, singing, lyrics, percussion, drums, low quality",
     },
     "compositor": {
         "font_paths": [
@@ -157,7 +163,7 @@ class ImageConfig:
 
 @dataclass(frozen=True)
 class MusicConfig:
-    """Music backend chain settings (ElevenLabs -> curated file)."""
+    """Music backend chain settings (local Stable Audio -> ElevenLabs -> curated file)."""
 
     backend: str
     model_id: str
@@ -168,6 +174,12 @@ class MusicConfig:
     max_retries: int
     retry_backoff_sec: int
     fallback_dir: Path
+    local_model: str
+    local_device: str
+    local_steps: int
+    local_segment_sec: float
+    local_crossfade_sec: float
+    local_negative_prompt: str
 
 
 @dataclass(frozen=True)
@@ -245,6 +257,8 @@ def _validate(data: dict[str, Any]) -> None:
         )
     if int(data["music"]["mood_pool_sample_size"]) > len(data["music"]["mood_pool"]):
         raise ConfigError("music.mood_pool_sample_size cannot exceed len(music.mood_pool)")
+    if float(data["music"]["local_crossfade_sec"]) >= float(data["music"]["local_segment_sec"]):
+        raise ConfigError("music.local_crossfade_sec must be less than music.local_segment_sec")
 
     privacy_status = data["publish"]["privacy_status"]
     if privacy_status not in VALID_PRIVACY_STATUSES:
@@ -317,6 +331,12 @@ def load_config(path: str | Path) -> Config:
             max_retries=int(merged["music"]["max_retries"]),
             retry_backoff_sec=int(merged["music"]["retry_backoff_sec"]),
             fallback_dir=Path(merged["music"]["fallback_dir"]),
+            local_model=merged["music"]["local_model"],
+            local_device=merged["music"]["local_device"],
+            local_steps=int(merged["music"]["local_steps"]),
+            local_segment_sec=float(merged["music"]["local_segment_sec"]),
+            local_crossfade_sec=float(merged["music"]["local_crossfade_sec"]),
+            local_negative_prompt=merged["music"]["local_negative_prompt"],
         ),
         compositor=CompositorConfig(
             font_paths=list(merged["compositor"]["font_paths"]),

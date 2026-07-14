@@ -42,7 +42,8 @@ image:
     high-contrast brushwork, bruised muted palette, textured canvas
 
 music:
-  # elevenlabs | curated_file
+  # local | elevenlabs | curated_file -- this is the START of the fallback chain,
+  # which continues through the other AI backend before curated_file as last resort.
   backend: elevenlabs
   model_id: music_v1
   mood_anchor: "meditative horror ambient, no vocals, no percussion hits"
@@ -52,6 +53,14 @@ music:
   max_retries: 3
   retry_backoff_sec: 5
   fallback_dir: ./audio
+  # Local Stable Audio Open settings (music.backend: local) -- see README for
+  # a local-vs-ElevenLabs quality comparison before picking a default.
+  local_model: stabilityai/stable-audio-open-1.0
+  local_device: mps
+  local_steps: 100
+  local_segment_sec: 40   # model caps out well under our target duration --
+  local_crossfade_sec: 3  # segments are crossfaded together to reach it
+  local_negative_prompt: "vocals, singing, lyrics, percussion, drums, low quality"
 
 compositor:
   font_paths:

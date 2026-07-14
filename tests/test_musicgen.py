@@ -10,9 +10,12 @@ from horrorvibes.exceptions import MusicGenerationError
 from horrorvibes.musicgen import (
     CuratedFileBackend,
     ElevenLabsMusicBackend,
+    build_crossfade_filter,
+    build_music_assembly_cmd,
     build_music_prompt,
     compute_duration_ms,
     generate_music,
+    plan_segment_count,
     with_retries,
 )
 
@@ -208,3 +211,124 @@ def test_generate_music_raises_when_entire_chain_fails(config, tmp_path):
             tmp_path / "music.mp3",
             backends={"curated_file": failing},
         )
+
+
+def test_generate_music_uses_local_backend_when_it_succeeds(config, tmp_path):
+    calls = []
+
+    def local(prompt, duration_ms, output_path):
+        calls.append("local")
+        output_path.write_bytes(b"generated-locally")
+
+    result = generate_music(
+        with_backend(config, "local"),
+        tmp_path / "music.mp3",
+        backends={
+            "local": local,
+            "elevenlabs": lambda *a: calls.append("elevenlabs"),
+            "curated_file": lambda *a: calls.append("curated_file"),
+        },
+    )
+
+    assert calls == ["local"]
+    assert result.backend_used == "local"
+
+
+def test_generate_music_local_falls_back_through_elevenlabs_to_curated_file(config, tmp_path):
+    calls = []
+
+    def local(prompt, duration_ms, output_path):
+        calls.append("local")
+        raise RuntimeError("MPS out of memory")
+
+    def elevenlabs(prompt, duration_ms, output_path):
+        calls.append("elevenlabs")
+        raise RuntimeError("quota exceeded")
+
+    def curated(prompt, duration_ms, output_path):
+        calls.append("curated_file")
+        output_path.write_bytes(b"fallback-track")
+
+    result = generate_music(
+        with_backend(config, "local"),
+        tmp_path / "music.mp3",
+        backends={"local": local, "elevenlabs": elevenlabs, "curated_file": curated},
+    )
+
+    assert calls == ["local", "elevenlabs", "curated_file"]
+    assert result.backend_used == "curated_file"
+
+
+def test_generate_music_elevenlabs_falls_back_to_local_before_curated_file(config, tmp_path):
+    """The elevenlabs-first chain tries the other AI backend before giving
+    up and using a static curated file."""
+    calls = []
+
+    def elevenlabs(prompt, duration_ms, output_path):
+        calls.append("elevenlabs")
+        raise RuntimeError("quota exceeded")
+
+    def local(prompt, duration_ms, output_path):
+        calls.append("local")
+        output_path.write_bytes(b"generated-locally")
+
+    result = generate_music(
+        with_backend(config, "elevenlabs"),
+        tmp_path / "music.mp3",
+        backends={
+            "elevenlabs": elevenlabs,
+            "local": local,
+            "curated_file": lambda *a: calls.append("curated"),
+        },
+    )
+
+    assert calls == ["elevenlabs", "local"]
+    assert result.backend_used == "local"
+
+
+@pytest.mark.parametrize(
+    "total_sec,segment_sec,crossfade_sec,expected",
+    [
+        (30, 40, 3, 1),      # fits in one segment
+        (40, 40, 3, 1),      # exactly one segment
+        (120, 40, 3, 4),     # 40 + 3*37 = 151 >= 120
+        (77, 40, 3, 2),      # 40 + 37 = 77 exactly
+    ],
+)
+def test_plan_segment_count(total_sec, segment_sec, crossfade_sec, expected):
+    assert plan_segment_count(total_sec, segment_sec, crossfade_sec) == expected
+
+
+def test_build_crossfade_filter_chains_pairwise_for_three_segments():
+    filter_complex, final_label = build_crossfade_filter(3, crossfade_sec=3)
+
+    assert filter_complex == (
+        "[0:a][1:a]acrossfade=d=3:c1=tri:c2=tri[cf1];" "[cf1][2:a]acrossfade=d=3:c1=tri:c2=tri[cf2]"
+    )
+    assert final_label == "cf2"
+
+
+def test_build_crossfade_filter_requires_at_least_two_segments():
+    with pytest.raises(ValueError):
+        build_crossfade_filter(1, crossfade_sec=3)
+
+
+def test_build_music_assembly_cmd_single_segment_has_no_filter_complex(tmp_path):
+    cmd = build_music_assembly_cmd(
+        [tmp_path / "seg0.wav"], crossfade_sec=3, trim_to_sec=40, output_path=tmp_path / "out.mp3"
+    )
+
+    assert "-filter_complex" not in cmd
+    assert cmd[-1] == str(tmp_path / "out.mp3")
+    assert "-t" in cmd and cmd[cmd.index("-t") + 1] == "40"
+
+
+def test_build_music_assembly_cmd_multi_segment_has_filter_complex_and_map(tmp_path):
+    segments = [tmp_path / "seg0.wav", tmp_path / "seg1.wav"]
+    cmd = build_music_assembly_cmd(
+        segments, crossfade_sec=3, trim_to_sec=77, output_path=tmp_path / "out.mp3"
+    )
+
+    assert "-filter_complex" in cmd
+    assert "-map" in cmd
+    assert cmd[cmd.index("-map") + 1] == "[cf1]"
