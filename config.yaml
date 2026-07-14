@@ -44,7 +44,8 @@ image:
 music:
   # local | elevenlabs | curated_file -- this is the START of the fallback chain,
   # which continues through the other AI backend before curated_file as last resort.
-  backend: elevenlabs
+  # local chosen as primary: sounds more haunting/meditative than elevenlabs (2026-07-14 A/B listen).
+  backend: local
   model_id: music_v1
   mood_anchor: "meditative horror ambient, no vocals, no percussion hits"
   mood_pool: [slow, sparse, drone, "unsettling calm", "minor key", distant]
