@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd user agent for horrorvibes on lola.
+
+  Fires once a day; the every-other-day cadence is enforced inside
+  orchestrator.is_run_due() (see logs/last_run.json), not by launchd
+  itself -- launchd has no native "every N days" primitive.
+
+  Paths below are already set for this machine's actual clone at
+  /Users/billmathews/horrorvibes. Re-check them if you ever move the repo.
+
+  Install with:
+    cp com.billford.horrorvibes.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.billford.horrorvibes.plist
+
+  Uninstall with:
+    launchctl unload ~/Library/LaunchAgents/com.billford.horrorvibes.plist
+    rm ~/Library/LaunchAgents/com.billford.horrorvibes.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.billford.horrorvibes</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/billmathews/horrorvibes/.venv/bin/python3</string>
+        <string>/Users/billmathews/horrorvibes/run.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/billmathews/horrorvibes</string>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/billmathews/horrorvibes/logs/launchd.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/billmathews/horrorvibes/logs/launchd.err.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>

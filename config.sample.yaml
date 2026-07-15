@@ -1,0 +1,135 @@
+# horrorvibes config. Copy to config.yaml and adjust.
+# Any key you omit falls back to the built-in default in horrorvibes/config.py.
+
+run:
+  quote_count: 12
+  duration_per_quote_sec: 10
+  width: 1080
+  height: 1920
+  fps: 30
+  quotes_dir: ./quotes
+  images_dir: ./images
+  frames_dir: ./frames
+  output_dir: ./output
+  quotes_history_path: ./quotes_history.txt
+  # Also copy each completed video here (best-effort; if this path is under
+  # /Volumes and the drive isn't mounted, archiving is skipped with a
+  # warning rather than failing the run or writing to the boot disk).
+  # completed_video_dir: "/Volumes/My External Drive/horrorvibes_output"
+  completed_video_dir: null
+  # Durable, append-only record of every quote that's appeared in a video --
+  # search it later to find which video a quote/movie was used in.
+  video_catalog_path: ./video_catalog.jsonl
+
+quotes:
+  model: gpt-4
+  max_attempts: 5
+  # Lower than the API default (1.0) -- favors accurate attribution over
+  # creative invention. See quotes.build_quote_request for the full reasoning.
+  temperature: 0.7
+  themes:
+    - classic horror
+    - modern horror
+    - psychological horror
+    - slasher films
+    - supernatural horror
+    - zombie films
+    - vampire movies
+    - ghost stories
+  # Durable record of which movie/show each quote came from, so the same
+  # one isn't quoted again too soon (within a video, or across nearby runs).
+  movie_history_path: ./movie_history.jsonl
+  movie_cooldown_days: 14
+
+image:
+  # local_sd | openai | gradient -- this is the START of the fallback chain,
+  # which always continues local_sd -> openai -> gradient from wherever it starts.
+  backend: local_sd
+  # Full SDXL base, not sdxl-turbo: turbo's 1-4 step distillation trades away
+  # prompt adherence for speed, at the cost of images not meaningfully
+  # relating to their quote/movie. Do your own bake-off if speed matters more
+  # to you than adherence -- see README.
+  sd_model: stabilityai/stable-diffusion-xl-base-1.0
+  sd_device: mps
+  sd_steps: 30
+  sd_guidance_scale: 7.0
+  sd_timeout_sec: 300
+  openai_model: gpt-image-1
+  openai_timeout_sec: 60
+  style_suffix: >-
+    expressionist horror painting, dramatic chiaroscuro lighting,
+    high-contrast brushwork, bruised muted palette, textured canvas
+
+music:
+  # local | elevenlabs | curated_file -- this is the START of the fallback chain,
+  # which continues through the other AI backend before curated_file as last resort.
+  backend: elevenlabs
+  model_id: music_v1
+  mood_anchor: "meditative horror ambient, no vocals, no percussion hits"
+  mood_pool: [slow, sparse, drone, "unsettling calm", "minor key", distant]
+  mood_pool_sample_size: 3
+  api_timeout_sec: 120
+  max_retries: 3
+  retry_backoff_sec: 5
+  fallback_dir: ./audio
+  # Local Stable Audio Open settings (music.backend: local) -- see README for
+  # a local-vs-ElevenLabs quality comparison before picking a default.
+  local_model: stabilityai/stable-audio-open-1.0
+  local_device: mps
+  local_steps: 100
+  local_segment_sec: 40   # model caps out well under our target duration --
+  local_crossfade_sec: 3  # segments are crossfaded together to reach it
+  local_negative_prompt: "vocals, singing, lyrics, percussion, drums, low quality"
+
+# Experimental: per-quote narration read aloud in a scary voice via ElevenLabs
+# TTS, mixed into the music track with the music automatically ducking under
+# narration. Off by default -- this is new spend beyond music.backend: elevenlabs
+# (same ELEVENLABS_API_KEY, separate usage) and needs the same key set up.
+voiceover:
+  enabled: false
+  voice_id: N2lVS1w4EtoT3dr4eOWO  # "Callum" -- hoarse/intense; audition others at elevenlabs.io/voice-library and swap freely
+  model_id: eleven_multilingual_v2
+  stability: 0.5
+  similarity_boost: 0.75
+  style: 0.3
+  use_speaker_boost: true
+  speed: 0.75  # slower, more menacing delivery -- 0.7 is ElevenLabs' floor before quality degrades
+  api_timeout_sec: 60
+  max_retries: 3
+  retry_backoff_sec: 5
+  # Music volume during each narration's exact window (linear, 0-1), and a
+  # gain boost applied to narration so it isn't buried under the music bed.
+  duck_volume: 0.3
+  narration_gain: 1.6
+  # Extra seconds a quote stays on screen past its narration's own length, so
+  # the next quote's narration never starts before this one has finished.
+  narration_pad_sec: 1.0
+
+compositor:
+  font_paths:
+    - /System/Library/Fonts/Supplemental/Arial Bold.ttf
+    - /Library/Fonts/Arial Bold.ttf
+    - /Library/Fonts/Helvetica.ttc
+  quote_font_size: 60
+  movie_font_size: 48
+  max_chars_per_line: 25
+  scrim_opacity: 150
+
+publish:
+  youtube_upload: true
+  # private | unlisted | public -- start private until you've watched a few
+  # unattended runs' worth of output, then flip this once you trust the pipeline.
+  privacy_status: private
+  category_id: "17"
+  client_secrets_path: ./client_secret.json
+  token_path: ./token.json
+
+logging:
+  level: INFO
+  file: ./logs/horrorvibes.log
+  max_bytes: 5000000
+  backup_count: 3
+
+automation:
+  min_hours_between_runs: 36
+  state_file: ./logs/last_run.json
