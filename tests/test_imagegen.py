@@ -170,3 +170,11 @@ def test_generate_image_names_file_by_index(config, tmp_path):
     )
 
     assert result.path.name == "background_5.png"
+
+
+def test_closest_supported_size_uses_gpt_image_portrait_size():
+    from horrorvibes.imagegen import _closest_supported_size
+
+    assert _closest_supported_size("gpt-image-1", 1080, 1920) == "1024x1536"
+    assert _closest_supported_size("gpt-image-1", 1920, 1080) == "1536x1024"
+    assert _closest_supported_size("dall-e-3", 1080, 1920) == "1024x1792"

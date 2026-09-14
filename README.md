@@ -126,6 +126,13 @@ should show up in logs, not just in output. Both AI backends share the same prom
 (keeps the mood consistent run-to-run) plus a random subset of mood descriptors from `music.mood_pool` (varies
 the texture).
 
+**Copyright claims and curated tracks**: the repo no longer ships a curated track. The one it used to include
+(a licensed Melodie Music library track) is registered with YouTube Content ID, and every video using it was
+auto-claimed despite a valid license -- disputes were rejected. `./audio` is now empty by default, so if both
+AI backends fail the run stops with a notification instead of publishing library music. If you add your own
+tracks there, `music.allow_curated_upload: false` (the default) still keeps any video that used one off
+YouTube: it's saved locally and the upload is skipped. Only use tracks you know are not in Content ID.
+
 **Local (`music.backend: local`)**: [Stable Audio Open](https://huggingface.co/stabilityai/stable-audio-open-1.0)
 via `diffusers`, same pattern as the local image backend -- free, runs on the M1 Ultra's `mps` backend. It's
 purpose-built for ambient/sound-design audio rather than structured songs, which fits "meditative horror
@@ -288,7 +295,7 @@ video always stays in `output_dir` regardless of whether archiving succeeds.
 ├── .env                       # OPENAI_API_KEY / ELEVENLABS_API_KEY -- never commit this
 ├── client_secret.json         # YouTube OAuth client secret -- never commit this
 ├── token.json                 # YouTube OAuth refresh token -- never commit this
-├── audio/                     # curated fallback tracks for music.backend failures
+├── audio/                     # optional curated fallback tracks (empty by default; never auto-uploaded)
 ├── quotes/ images/ frames/ output/   # working directories, recreated each run
 ├── quotes_history.txt          # exact-quote dedup history, appended atomically
 └── movie_history.jsonl         # movie/show recency history, appended atomically
@@ -317,7 +324,11 @@ model inference, no real uploads happen in the test suite.
 local SD (and possibly the OpenAI fallback too) failed for that run; the backend actually used for each image
 is logged at INFO level.
 **Music sounds like the same old track**: same idea -- check for a `"fallback backend"` warning from
-`musicgen`, meaning the ElevenLabs call failed and a curated file from `./audio` was used instead.
+`musicgen`, meaning both AI backends failed and a curated file from `./audio` was used instead (that video's
+upload is skipped unless `music.allow_curated_upload` is true).
+**Run failed with "All music backends ... failed"**: both local Stable Audio Open and ElevenLabs failed and
+there is no curated track to fall back to. Check the log for each backend's error -- for ElevenLabs, a
+401 `quota_exceeded` means the account or the key's own credit limit is used up.
 **FFmpeg errors**: make sure FFmpeg is installed and on `PATH` (`which ffmpeg`); see `INSTALL.md`.
 **YouTube upload skipped**: check for a `PublishError` in the logs -- almost always a missing/expired
 `token.json` needing a fresh interactive OAuth grant (see "Unattended YouTube upload" above).

@@ -92,6 +92,15 @@ def test_generate_quotes_returns_requested_count_on_first_attempt(tmp_path, quot
     assert len(client.calls) == 1
 
 
+def test_generate_quotes_skips_chat_preamble_lines_without_a_title(tmp_path, quotes_config):
+    client = FakeChatClient(["Here are 2 horror quotes:\n'A' - Movie1\n'B' - Movie2"])
+    history_path = tmp_path / "quotes_history.txt"
+
+    result = generate_quotes(client, quotes_config, count=2, history_path=history_path, rng=random.Random(1))
+
+    assert result == ["'A' - Movie1", "'B' - Movie2"]
+
+
 def test_generate_quotes_skips_quotes_already_in_history(tmp_path, quotes_config):
     history_path = tmp_path / "quotes_history.txt"
     history_path.write_text("'A' - Movie1\n", encoding="utf-8")

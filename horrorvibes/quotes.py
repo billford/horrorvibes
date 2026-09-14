@@ -216,14 +216,18 @@ def generate_quotes(  # pylint: disable=too-many-locals
                 logger.debug("Skipped duplicate quote: %.50s", line)
                 continue
             _, movie = split_quote_and_title(line)
+            if movie == "Unknown":
+                # No "QUOTE - TITLE" separator: chat preamble ("Here are 12
+                # quotes:") or an unattributed line -- never put it in a video.
+                logger.debug("Skipped line with no title: %.50s", line)
+                continue
             normalized_movie = normalize_movie(movie)
-            if movie != "Unknown" and normalized_movie in avoided_movies:
+            if normalized_movie in avoided_movies:
                 logger.debug("Skipped quote from a too-recently-used movie: %.50s", line)
                 continue
             new_quotes.append(line)
             used_quotes.add(normalized)
-            if movie != "Unknown":
-                avoided_movies.add(normalized_movie)
+            avoided_movies.add(normalized_movie)
 
     if not new_quotes:
         raise QuoteGenerationError(

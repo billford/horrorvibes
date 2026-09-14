@@ -259,6 +259,42 @@ def test_run_pipeline_uses_content_specific_youtube_metadata(config, monkeypatch
     assert entry["youtube_video_id"] == "yt-video-id"
 
 
+def test_run_pipeline_skips_upload_and_notifies_when_music_is_curated(config, monkeypatch):
+    chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
+    _mock_non_voiceover_stages(monkeypatch, music_backend="curated_file")
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("publish should not be called for a curated-music video")
+
+    notified = []
+    monkeypatch.setattr(publish, "publish", fail_if_called)
+    monkeypatch.setattr("horrorvibes.orchestrator.notify_failure", lambda msg: notified.append(msg))
+
+    config = dataclasses.replace(config, publish=dataclasses.replace(config.publish, youtube_upload=True))
+    result = run_pipeline(config, chat_client)
+
+    assert result.youtube_video_id is None
+    assert result.video_path.exists()
+    assert notified and "Content ID" in notified[0]
+    entry = json.loads(config.run.video_catalog_path.read_text(encoding="utf-8").splitlines()[0])
+    assert entry["music_backend"] == "curated_file"
+
+
+def test_run_pipeline_uploads_curated_music_when_explicitly_allowed(config, monkeypatch):
+    chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
+    _mock_non_voiceover_stages(monkeypatch, music_backend="curated_file")
+    monkeypatch.setattr(publish, "publish", lambda *args, **kwargs: "yt-video-id")
+
+    config = dataclasses.replace(
+        config,
+        publish=dataclasses.replace(config.publish, youtube_upload=True),
+        music=dataclasses.replace(config.music, allow_curated_upload=True),
+    )
+    result = run_pipeline(config, chat_client)
+
+    assert result.youtube_video_id == "yt-video-id"
+
+
 def test_run_pipeline_reuses_one_image_backend_set_across_all_quotes(config, monkeypatch):
     """Regression test: run_pipeline must build the image backend chain ONCE
     per run, not once per quote -- a prior version rebuilt it per-image,
@@ -336,7 +372,7 @@ def test_run_pipeline_forwards_elevenlabs_api_key_to_generate_music(config, monk
     assert received_kwargs.get("api_key") == "the-real-key"
 
 
-def _mock_non_voiceover_stages(monkeypatch):
+def _mock_non_voiceover_stages(monkeypatch, music_backend="local"):
     monkeypatch.setattr(
         imagegen,
         "generate_image",
@@ -352,7 +388,7 @@ def _mock_non_voiceover_stages(monkeypatch):
         musicgen,
         "generate_music",
         lambda cfg, output_path, **kwargs: musicgen.MusicResult(
-            path=_write(output_path), backend_used="curated_file"
+            path=_write(output_path), backend_used=music_backend
         ),
     )
     recorded_video_calls = []
@@ -592,7 +628,7 @@ def test_run_pipeline_skips_upload_and_logs_when_publish_fails(config, monkeypat
         musicgen,
         "generate_music",
         lambda cfg, output_path, **kwargs: musicgen.MusicResult(
-            path=_write(output_path), backend_used="curated_file"
+            path=_write(output_path), backend_used="local"
         ),
     )
     monkeypatch.setattr(

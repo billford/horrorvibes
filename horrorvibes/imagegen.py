@@ -123,7 +123,7 @@ class OpenAIImageBackend:
 
     def __call__(self, prompt: str, index: int, output_path: Path) -> None:
         client = self._client_or_default()
-        size = _closest_supported_size(self._width, self._height)
+        size = _closest_supported_size(self._config.openai_model, self._width, self._height)
         response = client.images.generate(
             model=self._config.openai_model,
             prompt=prompt,
@@ -134,10 +134,13 @@ class OpenAIImageBackend:
         output_path.write_bytes(base64.b64decode(image_b64))
 
 
-def _closest_supported_size(width: int, height: int) -> str:
-    """OpenAI's image API accepts a fixed set of sizes; map our 9:16 target
-    to the closest portrait option instead of passing an unsupported size."""
-    return "1024x1792" if height >= width else "1792x1024"
+def _closest_supported_size(model: str, width: int, height: int) -> str:
+    """OpenAI's image API accepts a fixed, per-model set of sizes; map our
+    9:16 target to the closest portrait option instead of passing an
+    unsupported size. dall-e-3 offers 1024x1792, but gpt-image-* models only
+    accept 1024x1536 and reject 1792 outright."""
+    long_side = "1792" if model.startswith("dall-e") else "1536"
+    return f"1024x{long_side}" if height >= width else f"{long_side}x1024"
 
 
 def render_gradient(  # pylint: disable=too-many-locals

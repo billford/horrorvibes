@@ -246,9 +246,12 @@ class LocalMusicBackend:
     together with ffmpeg to reach the target duration.
     """
 
-    def __init__(self, config: MusicConfig, runner: Runner = subprocess.run) -> None:
+    def __init__(
+        self, config: MusicConfig, runner: Runner = subprocess.run, rng: random.Random | None = None
+    ) -> None:
         self._config = config
         self._runner = runner
+        self._rng = rng or random.Random()  # nosec B311 - varies generated audio, not security-sensitive
         self._pipeline = None
 
     def _pipeline_or_load(self):
@@ -290,18 +293,22 @@ class LocalMusicBackend:
         audio = result.audios[0].T.float().cpu().numpy()
         sf.write(output_path, audio, pipeline.vae.sampling_rate)
 
-    def __call__(self, prompt: str, duration_ms: int, output_path: Path) -> None:
+    def __call__(self, prompt: str, duration_ms: int, output_path: Path) -> None:  # pylint: disable=too-many-locals
         pipeline = self._pipeline_or_load()
         target_sec = duration_ms / 1000
         segment_sec = min(self._config.local_segment_sec, target_sec)
         count = plan_segment_count(target_sec, segment_sec, self._config.local_crossfade_sec)
+        # A fresh base seed per run -- fixed seeds (0, 1, 2...) made every run
+        # with the same sampled prompt produce byte-identical music.
+        base_seed = self._rng.randint(0, 2**31 - 1)
+        logger.info("Local music base seed: %d", base_seed)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             segment_paths = []
             for i in range(count):
                 length = segment_sec if count > 1 else target_sec
                 segment_path = Path(tmp_dir) / f"segment_{i}.wav"
-                self._generate_segment(pipeline, prompt, length, seed=i, output_path=segment_path)
+                self._generate_segment(pipeline, prompt, length, seed=base_seed + i, output_path=segment_path)
                 segment_paths.append(segment_path)
 
             cmd = build_music_assembly_cmd(

@@ -264,7 +264,17 @@ def run_pipeline(  # pylint: disable=too-many-locals
     _archive_completed_video(config, video_path)
 
     youtube_video_id: str | None = None
-    if config.publish.youtube_upload:
+    curated_upload_blocked = (
+        music_result.backend_used == "curated_file" and not config.music.allow_curated_upload
+    )
+    if config.publish.youtube_upload and curated_upload_blocked:
+        message = (
+            f"Music fell back to a curated library track, which YouTube Content ID will claim; "
+            f"skipped upload. Video kept at {video_path}"
+        )
+        logger.error("%s (set music.allow_curated_upload to override)", message)
+        notify_failure(message)
+    elif config.publish.youtube_upload:
         try:
             youtube_video_id = publish.publish(
                 video_path,
@@ -280,7 +290,9 @@ def run_pipeline(  # pylint: disable=too-many-locals
 
     catalog.append_entry(
         config.run.video_catalog_path,
-        catalog.build_catalog_entry(video_path, generated_quotes, youtube_video_id, now()),
+        catalog.build_catalog_entry(
+            video_path, generated_quotes, youtube_video_id, now(), music_backend=music_result.backend_used
+        ),
     )
 
     return RunResult(
