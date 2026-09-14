@@ -92,6 +92,11 @@ DEFAULTS: dict[str, Any] = {
         "max_retries": 3,
         "retry_backoff_sec": 5,
         "fallback_dir": "./audio",
+        # Curated library tracks are almost always registered with YouTube
+        # Content ID, so a video using one gets auto-claimed even when you hold
+        # a valid license. By default, a run that fell back to a curated track
+        # keeps the video locally and skips the upload instead of publishing it.
+        "allow_curated_upload": False,
         "local_model": "stabilityai/stable-audio-open-1.0",
         "local_device": "mps",
         "local_steps": 100,
@@ -221,6 +226,7 @@ class MusicConfig:
     max_retries: int
     retry_backoff_sec: int
     fallback_dir: Path
+    allow_curated_upload: bool
     local_model: str
     local_device: str
     local_steps: int
@@ -408,6 +414,7 @@ def load_config(path: str | Path) -> Config:
             max_retries=int(merged["music"]["max_retries"]),
             retry_backoff_sec=int(merged["music"]["retry_backoff_sec"]),
             fallback_dir=Path(merged["music"]["fallback_dir"]),
+            allow_curated_upload=bool(merged["music"]["allow_curated_upload"]),
             local_model=merged["music"]["local_model"],
             local_device=merged["music"]["local_device"],
             local_steps=int(merged["music"]["local_steps"]),

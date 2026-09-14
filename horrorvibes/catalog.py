@@ -19,12 +19,16 @@ def build_catalog_entry(
     quotes: list[str],
     youtube_video_id: str | None,
     timestamp: datetime,
+    music_backend: str | None = None,
 ) -> dict:
-    """Pure construction of one catalog record -- no I/O."""
+    """Pure construction of one catalog record -- no I/O. ``music_backend``
+    records where the audio came from, so a copyright claim on an uploaded
+    video can be traced back to the track that caused it."""
     return {
         "timestamp": timestamp.isoformat(),
         "video_path": str(video_path),
         "youtube_video_id": youtube_video_id,
+        "music_backend": music_backend,
         "quotes": [
             {"quote": quote_text, "movie": movie}
             for quote_text, movie in (split_quote_and_title(quote) for quote in quotes)

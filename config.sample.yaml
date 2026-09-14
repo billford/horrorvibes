@@ -72,6 +72,11 @@ music:
   max_retries: 3
   retry_backoff_sec: 5
   fallback_dir: ./audio
+  # Curated library tracks (e.g. licensed stock music) are usually
+  # registered with YouTube Content ID, so videos using one get claimed even
+  # with a valid license. When false, a run that fell back to one keeps the
+  # video locally, skips the upload, and sends a macOS notification.
+  allow_curated_upload: false
   # Local Stable Audio Open settings (music.backend: local) -- see README for
   # a local-vs-ElevenLabs quality comparison before picking a default.
   local_model: stabilityai/stable-audio-open-1.0
