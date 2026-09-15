@@ -698,3 +698,20 @@ def test_main_unattended_returns_0_and_records_run_on_success(config, monkeypatc
 
     assert exit_code == 0
     assert config.automation.state_file.exists()
+
+
+def test_archive_completed_video_gives_up_on_a_hung_copy(config, tmp_path, monkeypatch, caplog):
+    import threading
+
+    release = threading.Event()
+    monkeypatch.setattr("horrorvibes.orchestrator.shutil.copy2", lambda src, dst: release.wait(5))
+    video_path = _write(tmp_path / "output" / "v.mp4")
+    config = dataclasses.replace(
+        config, run=dataclasses.replace(config.run, completed_video_dir=tmp_path / "archive")
+    )
+
+    with caplog.at_level("WARNING"):
+        _archive_completed_video(config, video_path, timeout_sec=0.1)
+    release.set()
+
+    assert any("did not finish" in r.message for r in caplog.records)
