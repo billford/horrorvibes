@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess  # nosec B404 - no shell=True anywhere below
 import tempfile
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -97,14 +98,35 @@ def _external_drive_available(path: Path, is_dir: Callable[[Path], bool] = Path.
     return True  # not a /Volumes path -- let the normal mkdir/copy handle it
 
 
-def _archive_completed_video(config: Config, video_path: Path) -> None:
+def _archive_completed_video(config: Config, video_path: Path, timeout_sec: float = 300) -> None:
     """Best-effort copy of the finished video to run.completed_video_dir, if
     configured. Never raises -- an unavailable archive drive must not fail
-    the run; the video is already safe in output_dir either way."""
-    archive_dir = config.run.completed_video_dir
-    if archive_dir is None:
+    the run; the video is already safe in output_dir either way.
+
+    The copy runs in a daemon thread with a timeout: under launchd, macOS can
+    block open() on a removable volume indefinitely (a "would like to access
+    files on a removable volume" prompt nobody is there to answer, or a
+    wedged USB drive), which once hung a scheduled run for hours. A daemon
+    thread still stuck in the kernel doesn't keep the process from exiting."""
+    if config.run.completed_video_dir is None:
         return
 
+    worker = threading.Thread(
+        target=_copy_to_archive, args=(config.run.completed_video_dir, video_path), daemon=True
+    )
+    worker.start()
+    worker.join(timeout_sec)
+    if worker.is_alive():
+        logger.warning(
+            "Archiving to %s did not finish within %ss (drive unresponsive, or macOS waiting on a "
+            "removable-volume permission prompt?); video stays in %s only",
+            config.run.completed_video_dir,
+            timeout_sec,
+            video_path,
+        )
+
+
+def _copy_to_archive(archive_dir: Path, video_path: Path) -> None:
     if not _external_drive_available(archive_dir):
         logger.warning(
             "Archive directory %s not available (drive not mounted?); video stays in %s only",
@@ -261,7 +283,6 @@ def run_pipeline(  # pylint: disable=too-many-locals
         config.run.fps,
         runner=subprocess.run,
     )
-    _archive_completed_video(config, video_path)
 
     youtube_video_id: str | None = None
     curated_upload_blocked = (
@@ -294,6 +315,8 @@ def run_pipeline(  # pylint: disable=too-many-locals
             video_path, generated_quotes, youtube_video_id, now(), music_backend=music_result.backend_used
         ),
     )
+    # Last, so a slow or unresponsive archive drive can never hold up the upload or the catalog entry.
+    _archive_completed_video(config, video_path)
 
     return RunResult(
         video_path=video_path, quote_count=len(generated_quotes), youtube_video_id=youtube_video_id
