@@ -216,11 +216,10 @@ video stays available locally either way.
 
 1. Set up a Google Cloud Project with the YouTube Data API v3 enabled, download the OAuth client secrets as
    `client_secret.json` in the project root.
-2. Run the pipeline once interactively (e.g. `python3 run.py --dry-run`, or a small one-off script that
-   calls `horrorvibes.publish.get_unattended_credentials` after an interactive
-   `InstalledAppFlow.run_local_server()` grant) to produce `token.json`. This step needs a browser; every run
-   after it does not.
-3. Confirm `token.json` contains a refresh token and `publish.py` can refresh it without your involvement.
+2. At the machine's own screen (it opens a browser), run `python3 scripts/authorize_youtube.py` and approve
+   access with the account that owns the channel. It writes `token.json` with a refresh token and checks that
+   `publish.py` can use it unattended. Every run after this needs no browser. (Signing in to YouTube in a
+   browser is not enough on its own -- only this grant creates `token.json`.)
 
 **Privacy status**: `publish.privacy_status` in config.yaml defaults to `private`. Since unattended runs
 publish without anyone reviewing each video first, we recommend staying on `private` until you've watched a
