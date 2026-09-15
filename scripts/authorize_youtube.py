@@ -32,7 +32,7 @@ def main() -> int:
     publish_config = load_config("config.yaml").publish
     secrets_path = publish_config.client_secrets_path
     if not secrets_path.exists():
-        print(f"Missing {secrets_path}: download the OAuth client (Desktop app) JSON from Google Cloud first.")
+        print(f"Missing {secrets_path}: download the Desktop app OAuth client JSON from Google Cloud first.")
         return 1
 
     flow = InstalledAppFlow.from_client_secrets_file(str(secrets_path), YOUTUBE_UPLOAD_SCOPES)
