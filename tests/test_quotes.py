@@ -18,6 +18,7 @@ from horrorvibes.quotes import (
     build_slot_briefs,
     build_verify_request,
     generate_quotes,
+    has_strong_profanity,
     is_near_duplicate,
     load_recent_movies,
     load_used_quotes,
@@ -387,3 +388,28 @@ def test_append_movie_history_skips_unknown_and_empty_list(tmp_path):
 
     append_movie_history(history_path, ["Unknown"], datetime(2026, 1, 1))
     assert not history_path.exists()
+
+
+def test_strong_profanity_is_detected_but_mild_words_pass():
+    assert has_strong_profanity("I'm an English teacher, not fucking Tomb Raider.")
+    assert has_strong_profanity("Welcome to prime time, bitch!")
+    assert not has_strong_profanity("Damn you all to hell.")
+    assert has_strong_profanity("You MOTHERFUCKER") and has_strong_profanity("bitches")
+    assert not has_strong_profanity("Cockroaches in the shiitake, Scunthorpe, a fagot of sticks")
+
+
+def test_generate_quotes_drops_profane_lines(tmp_path, quotes_config):
+    client = FakeResponsesClient(
+        [_quotes_payload(_item("Not fucking Tomb Raider", "The Descent"), _item("Clean", "Alien"))]
+    )
+    result = generate_quotes(client, quotes_config, 2, tmp_path / "h.txt", rng=random.Random(0))
+    assert result == ['"Clean" - Alien (1980)']
+
+
+def test_prompts_require_horror_genre_and_no_profanity(quotes_config):
+    briefs = build_slot_briefs(quotes_config, 1, random.Random(0))
+    instructions = build_quote_request(quotes_config, briefs, [], []).to_kwargs()["instructions"]
+    assert "genuinely horror" in instructions and "profanity" in instructions
+    candidate = QuoteCandidate("Boo", "Film", 1999, "film", "", "high")
+    verify = build_verify_request(quotes_config, [candidate]).to_kwargs()["instructions"]
+    assert "not generally classed as horror" in verify

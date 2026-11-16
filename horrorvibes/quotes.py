@@ -113,15 +113,18 @@ _SYSTEM_PROMPT = (
     "You may relax region first, then decade, if you have no confident line that fits -- never "
     "relax rule 1 to fit a slot.\n"
     "3. Every line must come from a different title, and none from the excluded titles or "
-    "excluded lines.\n"
-    "4. Prefer lines that stand alone out of context, land in under 25 words, and would read "
+    "excluded lines. Every title must be genuinely horror -- not a crime drama, thriller, "
+    "workplace drama or sci-fi that merely has dark moments.\n"
+    "4. No strong profanity or slurs: the video is a YouTube Short.\n"
+    "5. Prefer lines that stand alone out of context, land in under 25 words, and would read "
     "well over a dark image. When a film has one overwhelmingly famous line, prefer another "
     "memorable line from it if you know one accurately.\n"
     "Give the quote text without surrounding quotation marks.\n"
     "For each line also give:\n"
     "- visual_scene: one or two sentences describing an ORIGINAL image that evokes the line -- "
     "setting, light, objects, weather, atmosphere. Never depict the actual film's actors, "
-    "recognisable characters, costumes or logos; no text or lettering; no gore.\n"
+    "recognisable characters, costumes or logos; no text, lettering, borders or picture "
+    "frames; nothing graphic -- no gore, corpses, hanged figures or self-harm imagery.\n"
     "- delivery: how a narrator should voice the line, matching how it is said in the scene."
 )
 
@@ -129,7 +132,9 @@ _VERIFY_PROMPT = (
     "You fact-check horror movie and TV quotes. For each numbered item, use web search to "
     "confirm the line is actually spoken, essentially word for word, in the named title. "
     "Set accurate=false if you cannot find support, if the wording differs materially, or if it "
-    "comes from a different work. If the line is right but the year is wrong, set correct_year "
+    "comes from a different work. Also set accurate=false if the title is not generally "
+    "classed as horror, or if the line contains strong profanity or slurs. If the line is "
+    "right but the year is wrong, set correct_year "
     "to the right year; otherwise null. Keep each note to one short sentence."
 )
 
@@ -211,6 +216,19 @@ def normalize_movie(movie: str) -> str:
     text = re.sub(r"[^a-z0-9 ]+", " ", text)
     text = " ".join(text.split())
     return re.sub(r"^(the|a|an) ", "", text)
+
+
+# Deterministic backstop for the prompt's no-strong-profanity rule.
+_STRONG_PROFANITY = re.compile(
+    r"\b(?:(?:mother)?fuck(?:s|ed|er|ers|ing|in)?|shit(?:s|ty|ting|head)?|cunts?|cocks?(?:sucker)?"
+    r"|bitch(?:es|y)?|bastards?|nigg(?:a|as|er|ers)|fags?|faggots?)\b",
+    re.IGNORECASE,
+)
+
+
+def has_strong_profanity(text: str) -> bool:
+    """True if ``text`` contains a word YouTube treats as strong profanity."""
+    return bool(_STRONG_PROFANITY.search(text))
 
 
 def is_near_duplicate(key: str, used_keys: list[str] | set[str], threshold: float) -> bool:
@@ -497,6 +515,8 @@ def _filter_candidates(
         movie = normalize_movie(candidate.title)
         if candidate.confidence not in accepted_confidence:
             logger.debug("Skipped %s-confidence quote from %s", candidate.confidence, candidate.title)
+        elif has_strong_profanity(candidate.quote):
+            logger.info("Skipped quote with strong profanity from %s", candidate.title)
         elif not movie:
             logger.debug("Skipped quote with no title: %.50s", candidate.quote)
         elif movie in avoided_movies or movie in batch_movies:

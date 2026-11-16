@@ -259,8 +259,8 @@ DEFAULTS: dict[str, Any] = {
         },
         {
             "name": "grindhouse_poster",
-            "image_style": "1970s grindhouse horror movie poster painting, lurid saturated colours, "
-                           "airbrushed illustration, halftone print texture, dramatic composition",
+            "image_style": "1970s grindhouse exploitation-film painted artwork style, lurid saturated "
+                           "colours, airbrushed illustration, halftone texture, dramatic composition",
             "font_paths": ["/System/Library/Fonts/Supplemental/Impact.ttf"],
             "layout": "upper", "text_color": [240, 220, 170], "highlight_color": [255, 60, 40],
             "scrim_opacity": 0, "stroke_width": 4,
@@ -287,8 +287,8 @@ DEFAULTS: dict[str, Any] = {
         },
         {
             "name": "woodcut_folk",
-            "image_style": "black and white woodcut print, folk horror, rough carved lines, "
-                           "pagan rural landscape, antique engraving, stark composition",
+            "image_style": "black and white woodcut style, folk horror, rough carved lines, "
+                           "pagan rural landscape, stark high-contrast composition",
             "font_paths": ["/System/Library/Fonts/Supplemental/Luminari.ttf"],
             "layout": "center", "text_color": [235, 225, 200], "highlight_color": [255, 250, 235],
             "scrim_opacity": 150, "stroke_width": 0,
@@ -316,8 +316,8 @@ DEFAULTS: dict[str, Any] = {
         },
         {
             "name": "polaroid_evidence",
-            "image_style": "faded 1970s polaroid photograph, harsh flash, evidence photo, "
-                           "washed-out colours, light leaks, unsettling everyday scene",
+            "image_style": "1970s amateur flash photography look, harsh on-camera flash, faded "
+                           "washed-out colours, light leaks, film grain, unsettling everyday scene",
             "font_paths": ["/System/Library/Fonts/Supplemental/AmericanTypewriter.ttc"],
             "layout": "lower", "text_color": [235, 235, 225], "highlight_color": [255, 255, 255],
             "scrim_opacity": 160, "stroke_width": 0,
