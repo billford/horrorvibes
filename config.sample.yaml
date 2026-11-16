@@ -91,8 +91,10 @@ image:
   backend: mflux
   # FLUX.2 Klein via mflux (Apple MLX; `pip install mflux`). If the command
   # isn't installed or fails, the run falls through to local SDXL below.
+  # 4B, not 9B: the 9B repo is gated on Hugging Face (non-commercial licence).
+  # Bake-off on lola 2026-11-16: ~19s/image vs ~88s for SDXL, much better prompt adherence.
   mflux_command: mflux-generate-flux2
-  mflux_model: flux2-klein-9b
+  mflux_model: flux2-klein-4b
   mflux_steps: 4
   mflux_width: 768     # 9:16, divisible by 16; upscaled at render time
   mflux_height: 1344

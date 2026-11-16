@@ -66,7 +66,10 @@ def build_scene_prompt(visual_scene: str, style: str) -> str:
     style pack's look. Portrait framing and no lettering are stated
     explicitly, since text is composited separately."""
     scene = visual_scene.strip().rstrip(".")
-    return f"{scene}. {style}. Vertical portrait composition, no text, no lettering."
+    return (
+        f"{scene}. {style}. Vertical portrait composition, full-bleed edge to edge, "
+        "no border or frame, no text, no lettering."
+    )
 
 
 class ImageBackend(Protocol):

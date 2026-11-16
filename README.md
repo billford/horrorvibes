@@ -153,7 +153,9 @@ a warning and falls back to the original static frame-by-frame assembly. A run n
   invoked as the `mflux-generate-flux2` CLI. Install it with `pip install mflux` in the run's venv. It's
   Apple Silicon only, so it isn't in `requirements.txt`. diffusers on MPS is unreliable for FLUX, which is
   why this is a separate backend. If the command is missing or fails, the run falls through to SDXL.
-  **Do a visual bake-off before trusting it unattended**:
+  The default is `flux2-klein-4b`. The 9B variant is gated on Hugging Face under a non-commercial licence.
+  In a 2026-11-16 bake-off on lola, 4B took ~19 s per image against ~88 s for SDXL, with clearly better
+  prompt adherence. To compare again:
   `python3 scripts/smoke_test_imagegen.py "'A quote.' - A Movie (Year)"` with `image.backend` set to
   `mflux`, then to `local_sd`.
 - **`local_sd`**: SDXL base 1.0 at 30 steps. `sdxl-turbo` was dropped after a 2026-07-14 run showed poor

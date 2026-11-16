@@ -216,7 +216,7 @@ def test_mflux_cmd_and_missing_binary(tmp_path, monkeypatch):
     backend = MfluxBackend(config, runner=lambda *a, **k: None)
     cmd = backend.build_cmd("a prompt", 42, tmp_path / "o.png")
     assert cmd[0] == "mflux-generate-flux2"
-    assert cmd[cmd.index("--model") + 1] == "flux2-klein-9b"
+    assert cmd[cmd.index("--model") + 1] == "flux2-klein-4b"
     assert cmd[cmd.index("--prompt") + 1] == "a prompt"
     assert cmd[cmd.index("--seed") + 1] == "42"
 

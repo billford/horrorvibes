@@ -99,7 +99,7 @@ DEFAULTS: dict[str, Any] = {
         # unreliable for FLUX. Generated at a 9:16 size divisible by 16 and
         # upscaled by the compositor/motion step.
         "mflux_command": "mflux-generate-flux2",
-        "mflux_model": "flux2-klein-9b",
+        "mflux_model": "flux2-klein-4b",
         "mflux_steps": 4,
         "mflux_width": 768,
         "mflux_height": 1344,
@@ -404,7 +404,7 @@ class ImageConfig:
     openai_timeout_sec: int
     style_suffix: str
     mflux_command: str = "mflux-generate-flux2"
-    mflux_model: str = "flux2-klein-9b"
+    mflux_model: str = "flux2-klein-4b"
     mflux_steps: int = 4
     mflux_width: int = 768
     mflux_height: int = 1344
