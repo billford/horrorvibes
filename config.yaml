@@ -189,6 +189,8 @@ publish:
   category_id: "17"
   client_secrets_path: ./client_secret.json
   token_path: ./token.json
+  # Tick YouTube's altered/synthetic media disclosure (images, music and narration are AI-generated).
+  contains_synthetic_media: true
 
 # Animated assembly: Ken Burns zoom per quote, style-pack colour grade and
 # film texture, xfade transitions, and word-synced captions. If rendering

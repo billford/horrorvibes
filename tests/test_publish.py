@@ -37,6 +37,12 @@ def test_build_video_metadata_shape():
     assert metadata["snippet"]["tags"] == ["a", "b"]
     assert metadata["status"]["privacyStatus"] == "unlisted"
     assert metadata["status"]["selfDeclaredMadeForKids"] is False
+    assert metadata["status"]["containsSyntheticMedia"] is True
+
+
+def test_build_video_metadata_can_omit_synthetic_media_disclosure():
+    metadata = build_video_metadata("t", "d", [], "17", "private", contains_synthetic_media=False)
+    assert metadata["status"]["containsSyntheticMedia"] is False
 
 
 def test_get_unattended_credentials_raises_when_no_token_file(tmp_path):

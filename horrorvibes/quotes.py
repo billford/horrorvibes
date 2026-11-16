@@ -121,10 +121,14 @@ _SYSTEM_PROMPT = (
     "memorable line from it if you know one accurately.\n"
     "Give the quote text without surrounding quotation marks.\n"
     "For each line also give:\n"
-    "- visual_scene: one or two sentences describing an ORIGINAL image that evokes the line -- "
-    "setting, light, objects, weather, atmosphere. Never depict the actual film's actors, "
-    "recognisable characters, costumes or logos; no text, lettering, borders or picture "
-    "frames; nothing graphic -- no gore, corpses, hanged figures or self-harm imagery.\n"
+    "- visual_scene: one or two sentences describing an image of THIS title's own world, so a "
+    "fan would recognise which film or show it is: its distinctive location, era, props, "
+    "weather and the situation in the scene where the line is spoken (for example a "
+    "snowbound sorority house at Christmas, a cornfield at dusk, an empty hotel corridor). Be "
+    "concrete and specific to the title, never a generic spooky landscape. People may appear "
+    "only as silhouettes, distant figures or from behind. Never depict the actual actors' faces "
+    "or likenesses, trademark monster or mask designs, or logos; no text, lettering, borders or "
+    "picture frames; nothing graphic -- no gore, corpses, hanged figures or self-harm imagery.\n"
     "- delivery: how a narrator should voice the line, matching how it is said in the scene."
 )
 

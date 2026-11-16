@@ -160,6 +160,8 @@ DEFAULTS: dict[str, Any] = {
         "category_id": "17",
         "client_secrets_path": "./client_secret.json",
         "token_path": "./token.json",  # nosec B105 - a file path default, not a credential value
+        # YouTube's altered/synthetic media disclosure: images, music and narration are AI-generated.
+        "contains_synthetic_media": True,
     },
     "voiceover": {
         "enabled": False,
@@ -287,8 +289,8 @@ DEFAULTS: dict[str, Any] = {
         },
         {
             "name": "woodcut_folk",
-            "image_style": "black and white woodcut style, folk horror, rough carved lines, "
-                           "pagan rural landscape, stark high-contrast composition",
+            "image_style": "black and white woodcut print style, rough carved lines, "
+                           "stark high-contrast composition",
             "font_paths": ["/System/Library/Fonts/Supplemental/Luminari.ttf"],
             "layout": "center", "text_color": [235, 225, 200], "highlight_color": [255, 250, 235],
             "scrim_opacity": 150, "stroke_width": 0,
@@ -301,8 +303,8 @@ DEFAULTS: dict[str, Any] = {
         },
         {
             "name": "cosmic_void",
-            "image_style": "cosmic horror digital painting, vast impossible geometry, deep space void, "
-                           "bioluminescent teal and violet light, overwhelming scale",
+            "image_style": "cosmic horror digital painting, eerie bioluminescent teal and violet light, "
+                           "dreamlike surreal atmosphere",
             "font_paths": ["/System/Library/Fonts/Avenir Next Condensed.ttc",
                            "/System/Library/Fonts/Supplemental/Futura.ttc"],
             "layout": "center", "text_color": [190, 225, 235], "highlight_color": [240, 255, 255],
@@ -317,7 +319,7 @@ DEFAULTS: dict[str, Any] = {
         {
             "name": "polaroid_evidence",
             "image_style": "1970s amateur flash photography look, harsh on-camera flash, faded "
-                           "washed-out colours, light leaks, film grain, unsettling everyday scene",
+                           "washed-out colours, light leaks, film grain",
             "font_paths": ["/System/Library/Fonts/Supplemental/AmericanTypewriter.ttc"],
             "layout": "lower", "text_color": [235, 235, 225], "highlight_color": [255, 255, 255],
             "scrim_opacity": 160, "stroke_width": 0,
@@ -453,6 +455,7 @@ class PublishConfig:
     category_id: str
     client_secrets_path: Path
     token_path: Path
+    contains_synthetic_media: bool = True
 
 
 @dataclass(frozen=True)
@@ -832,6 +835,7 @@ def load_config(path: str | Path) -> Config:
             category_id=str(merged["publish"]["category_id"]),
             client_secrets_path=Path(merged["publish"]["client_secrets_path"]),
             token_path=Path(merged["publish"]["token_path"]),
+            contains_synthetic_media=bool(merged["publish"]["contains_synthetic_media"]),
         ),
         voiceover=VoiceoverConfig(
             enabled=bool(merged["voiceover"]["enabled"]),
