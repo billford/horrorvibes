@@ -23,14 +23,22 @@ from horrorvibes.orchestrator import (
 )
 
 
-def _response(content: str):
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+def _response(legacy_lines: str):
+    """Turn "'QUOTE' - TITLE" lines into the Responses API structured payload."""
+    items = []
+    for slot, line in enumerate(legacy_lines.splitlines(), start=1):
+        quote, title = line.split(" - ")
+        items.append({
+            "slot": slot, "quote": quote.strip("'"), "title": title, "year": 0,
+            "medium": "film", "speaker": "", "confidence": "high",
+        })
+    return SimpleNamespace(output_text=json.dumps({"quotes": items}))
 
 
 class FakeChatClient:
     def __init__(self, responses):
         self._responses = list(responses)
-        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+        self.responses = SimpleNamespace(create=self._create)
 
     def _create(self, **kwargs):  # pylint: disable=unused-argument
         return _response(self._responses.pop(0))
@@ -49,7 +57,9 @@ def config(tmp_path):
         quotes_history_path=tmp_path / "quotes_history.txt",
         video_catalog_path=tmp_path / "video_catalog.jsonl",
     )
-    rooted_quotes = dataclasses.replace(base.quotes, movie_history_path=tmp_path / "movie_history.jsonl")
+    rooted_quotes = dataclasses.replace(
+        base.quotes, movie_history_path=tmp_path / "movie_history.jsonl", verify=False
+    )
     rooted_music = dataclasses.replace(base.music, fallback_dir=tmp_path / "audio")
     rooted_publish = dataclasses.replace(
         base.publish, token_path=tmp_path / "token.json", client_secrets_path=tmp_path / "client_secret.json"
@@ -227,8 +237,8 @@ def test_run_pipeline_generates_expected_number_of_frames_and_video(config, monk
     entry = json.loads(catalog_lines[0])
     assert entry["youtube_video_id"] is None
     assert entry["quotes"] == [
-        {"quote": "'A'", "movie": "Movie1"},
-        {"quote": "'B'", "movie": "Movie2"},
+        {"quote": '"A"', "movie": "Movie1"},
+        {"quote": '"B"', "movie": "Movie2"},
     ]
 
 
@@ -252,7 +262,7 @@ def test_run_pipeline_uses_content_specific_youtube_metadata(config, monkeypatch
     assert result.youtube_video_id == "yt-video-id"
     assert "Movie1" in published["title"]
     assert "Movie1" in published["description"]
-    assert "'A'" in published["description"]
+    assert '"A"' in published["description"]
     assert "horror" in published["tags"]
 
     entry = json.loads(config.run.video_catalog_path.read_text(encoding="utf-8").splitlines()[0])

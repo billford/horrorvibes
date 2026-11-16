@@ -76,24 +76,31 @@ python3 run.py                # full pipeline, uploads to YouTube if publish.you
 Everything else (image/music backends, prompts, fonts, privacy status, logging, cadence) lives in
 `config.yaml` -- see `config.sample.yaml` for the full annotated list of settings.
 
-## Quote accuracy
+## Quote accuracy and variety
 
-Quote generation still goes through the same OpenAI chat model as v1 (see Non-Goals) -- what changed is the
-prompt and `quotes.temperature` (0.7, down from the API's 1.0 default). A chat model asked for "impactful,
-unique, non-overused" horror quotes at high temperature has real incentive to invent a plausible-sounding
-line or misattribute a real one to the wrong film. The system prompt now explicitly tells the model accuracy
-matters more than novelty, and to pick a different, well-documented quote rather than guess at one it isn't
-confident about; the lower temperature makes it lean on what it actually knows rather than get creative. This
-narrows but doesn't eliminate the risk -- there's no external quote database cross-check here, so a wrong
-attribution is still possible. `quotes.py`'s history/dedup file gives you a durable record of exactly what was
-generated per run if you want to spot-check attributions after the fact.
+Quotes come from the OpenAI **Responses API** with a strict JSON schema (`quote, title, year, medium, speaker,
+confidence`), so there is no free-text parsing. `quotes.model` defaults to `gpt-5.5`. Reasoning models reject
+`temperature`, so it is only sent when set.
 
-Beyond exact-text dedup, `quotes.py` also tracks which movie/show each quote came from in
-`quotes.movie_history_path` (default `./movie_history.jsonl`) and avoids picking another quote from that same
-title for `quotes.movie_cooldown_days` (default 14) -- both within a single run's batch and across separate
-runs. This is a second, independent guard: two differently-worded quotes can still both be from, say, *The
-Shining*, and exact-text dedup alone wouldn't catch that a video (or two nearby videos) is dominated by one
-film.
+**Variety.** Each quote is requested against its own randomly sampled brief, a combination of decade,
+subgenre (`quotes.themes`), region (`quotes.regions`, weighted) and film or TV (`quotes.tv_share`). The
+prompt also lists the titles still in cooldown and the most recently used lines as exclusions, so the model
+avoids them up front instead of having them filtered out afterwards. After generation:
+
+- **Titles** are compared with the year, a leading article and punctuation removed, so *The Shining (1980)*
+  and *Shining* are treated as the same film. A title can't recur within `quotes.movie_cooldown_days`
+  (default 30) or twice in one video.
+- **Quotes** are compared by their text alone, with fuzzy matching (`quotes.fuzzy_dup_threshold`, default
+  0.88). A reworded or differently punctuated repeat is still caught.
+
+**Accuracy.** The model rates its own confidence. Low-confidence lines are always dropped, and
+medium-confidence lines are kept only when verification is on. With `quotes.verify: true` (the default), a
+second request uses the `web_search` tool to check every candidate. Lines it can't confirm are dropped, and
+wrong years are corrected. If the verification call itself fails, the run keeps the candidates and logs a
+warning rather than failing. `quotes_history.txt` and `video_catalog.jsonl` still record exactly what went
+out, if you want to spot-check.
+
+See `docs/specs/v3-diversity.md` for the diagnosis behind these changes and the planned video-side work.
 
 ## Image generation
 

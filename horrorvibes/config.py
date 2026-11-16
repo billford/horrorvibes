@@ -42,27 +42,45 @@ DEFAULTS: dict[str, Any] = {
         "video_catalog_path": "./video_catalog.jsonl",
     },
     "quotes": {
-        "model": "gpt-4",
-        "max_attempts": 5,
-        # Lower than the API default (1.0) -- favors the model's actual training
-        # data over creative invention, since a wrong-but-plausible quote or a
-        # misattributed movie title is worse than a slightly less varied one.
-        "temperature": 0.7,
+        # Responses API model. Reasoning models reject temperature, so it is
+        # only sent when set (null = omit). See docs/specs/v3-diversity.md.
+        "model": "gpt-5.5",
+        "reasoning_effort": "low",
+        "temperature": None,
+        "max_attempts": 4,
+        # Second pass that checks each candidate with the web_search tool and
+        # drops lines it can't confirm. A failed check keeps the candidates.
+        "verify": True,
+        "verify_model": None,  # null = same as model
+        # Quote text similarity (0-1) at or above which a quote counts as a
+        # repeat of one already used.
+        "fuzzy_dup_threshold": 0.88,
+        # Max recently-used titles/quotes listed in the prompt as exclusions.
+        "exclusion_prompt_limit": 150,
+        # Each quote gets its own (decade, subgenre, region, medium) brief so a
+        # batch spreads across the genre instead of the same famous films.
         "themes": [
-            "classic horror",
-            "modern horror",
-            "psychological horror",
-            "slasher films",
-            "supernatural horror",
-            "zombie films",
-            "vampire movies",
-            "ghost stories",
+            "slasher", "supernatural possession", "haunted house", "ghost story",
+            "folk horror", "body horror", "cosmic horror", "psychological horror",
+            "creature feature", "zombie", "vampire", "werewolf", "witchcraft",
+            "found footage", "giallo", "gothic horror", "sci-fi horror",
+            "survival horror", "home invasion", "horror comedy", "cult horror",
+            "killer doll or toy", "anthology", "monster movie",
         ],
+        "decades": [1920, 1930, 1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020],
+        # Relative sampling weights. Weighted toward English-language titles,
+        # where quote recall (and verification) is most reliable.
+        "regions": {
+            "American": 5, "British": 2, "Japanese": 1, "South Korean": 1,
+            "Spanish": 0.5, "Italian": 0.5, "French": 0.5, "Mexican": 0.5,
+            "Canadian": 0.5, "Australian": 0.5,
+        },
+        # Fraction of slots that ask for a TV series instead of a film.
+        "tv_share": 0.3,
         # Durable record of which movie/show each quote came from, so the
-        # same one isn't quoted again too soon (within a single video, or
-        # across nearby runs) even if the quote text itself is different.
+        # same one isn't quoted again too soon.
         "movie_history_path": "./movie_history.jsonl",
-        "movie_cooldown_days": 14,
+        "movie_cooldown_days": 30,
     },
     "image": {
         "backend": "local_sd",
@@ -192,10 +210,18 @@ class QuotesConfig:
 
     model: str
     max_attempts: int
-    temperature: float
+    temperature: float | None
     themes: list[str]
     movie_history_path: Path
     movie_cooldown_days: float
+    reasoning_effort: str | None = "low"
+    verify: bool = True
+    verify_model: str | None = None
+    fuzzy_dup_threshold: float = 0.88
+    exclusion_prompt_limit: int = 150
+    decades: list[int] = field(default_factory=lambda: list(range(1920, 2030, 10)))
+    regions: dict[str, float] = field(default_factory=lambda: {"American": 1.0})
+    tv_share: float = 0.3
 
 
 @dataclass(frozen=True)
@@ -318,6 +344,22 @@ def _validate(data: dict[str, Any]) -> None:
     if int(run["duration_per_quote_sec"]) <= 0:
         raise ConfigError("run.duration_per_quote_sec must be a positive integer")
 
+    quotes_cfg = data["quotes"]
+    if not quotes_cfg["themes"]:
+        raise ConfigError("quotes.themes must list at least one subgenre")
+    if not quotes_cfg["decades"]:
+        raise ConfigError("quotes.decades must list at least one decade")
+    if not isinstance(quotes_cfg["regions"], dict) or not quotes_cfg["regions"]:
+        raise ConfigError("quotes.regions must be a non-empty mapping of region -> weight")
+    if any(float(w) < 0 for w in quotes_cfg["regions"].values()) or not any(
+        float(w) > 0 for w in quotes_cfg["regions"].values()
+    ):
+        raise ConfigError("quotes.regions weights must be >= 0 with at least one > 0")
+    if not 0.0 <= float(quotes_cfg["tv_share"]) <= 1.0:
+        raise ConfigError("quotes.tv_share must be between 0 and 1")
+    if not 0.0 < float(quotes_cfg["fuzzy_dup_threshold"]) <= 1.0:
+        raise ConfigError("quotes.fuzzy_dup_threshold must be in (0, 1]")
+
     image_backend = data["image"]["backend"]
     if image_backend not in VALID_IMAGE_BACKENDS:
         raise ConfigError(
@@ -388,10 +430,22 @@ def load_config(path: str | Path) -> Config:
         quotes=QuotesConfig(
             model=merged["quotes"]["model"],
             max_attempts=int(merged["quotes"]["max_attempts"]),
-            temperature=float(merged["quotes"]["temperature"]),
+            temperature=(
+                float(merged["quotes"]["temperature"])
+                if merged["quotes"]["temperature"] is not None
+                else None
+            ),
             themes=list(merged["quotes"]["themes"]),
             movie_history_path=Path(merged["quotes"]["movie_history_path"]),
             movie_cooldown_days=float(merged["quotes"]["movie_cooldown_days"]),
+            reasoning_effort=merged["quotes"]["reasoning_effort"] or None,
+            verify=bool(merged["quotes"]["verify"]),
+            verify_model=merged["quotes"]["verify_model"] or None,
+            fuzzy_dup_threshold=float(merged["quotes"]["fuzzy_dup_threshold"]),
+            exclusion_prompt_limit=int(merged["quotes"]["exclusion_prompt_limit"]),
+            decades=[int(d) for d in merged["quotes"]["decades"]],
+            regions={str(k): float(v) for k, v in merged["quotes"]["regions"].items()},
+            tv_share=float(merged["quotes"]["tv_share"]),
         ),
         image=ImageConfig(
             backend=merged["image"]["backend"],
