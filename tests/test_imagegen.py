@@ -8,13 +8,20 @@ non-pytest smoke test of actual local SD inference).
 
 # pylint: disable=missing-function-docstring,missing-class-docstring,redefined-outer-name,unused-argument,unnecessary-lambda,import-outside-toplevel,use-implicit-booleaness-not-comparison
 import dataclasses
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
 
 from horrorvibes.config import load_config
 from horrorvibes.exceptions import ImageGenerationError
-from horrorvibes.imagegen import build_sd_prompt, generate_image, render_gradient
+from horrorvibes.imagegen import (
+    MfluxBackend,
+    build_scene_prompt,
+    build_sd_prompt,
+    generate_image,
+    render_gradient,
+)
 
 
 @pytest.fixture
@@ -178,3 +185,51 @@ def test_closest_supported_size_uses_gpt_image_portrait_size():
     assert _closest_supported_size("gpt-image-1", 1080, 1920) == "1024x1536"
     assert _closest_supported_size("gpt-image-1", 1920, 1080) == "1536x1024"
     assert _closest_supported_size("dall-e-3", 1080, 1920) == "1024x1792"
+
+
+# ---- mflux backend & scene prompts ---------------------------------------------------
+
+
+def test_scene_prompt_combines_scene_style_and_portrait_no_text():
+    prompt = build_scene_prompt("A fog-bound pier at dusk.", "woodcut print")
+    assert prompt.startswith("A fog-bound pier at dusk. woodcut print.")
+    assert "no text" in prompt
+
+
+def test_generate_image_prefers_visual_scene_and_pack_style(tmp_path):
+    config = load_config(tmp_path / "missing.yaml")
+    prompts = []
+    backends = {name: (lambda p, i, out: (prompts.append(p), out.write_bytes(b"x"))) for name in ("mflux",)}
+
+    result = generate_image(
+        "'Redrum.' - The Shining", 0, config, tmp_path, backends=backends,
+        visual_scene="An empty hotel corridor", style="VHS still",
+    )
+
+    assert result.backend_used == "mflux"
+    assert prompts[0].startswith("An empty hotel corridor. VHS still.")
+    assert "Shining" not in prompts[0]
+
+
+def test_mflux_cmd_and_missing_binary(tmp_path, monkeypatch):
+    config = load_config(tmp_path / "missing.yaml").image
+    backend = MfluxBackend(config, runner=lambda *a, **k: None)
+    cmd = backend.build_cmd("a prompt", 42, tmp_path / "o.png")
+    assert cmd[0] == "mflux-generate-flux2"
+    assert cmd[cmd.index("--model") + 1] == "flux2-klein-9b"
+    assert cmd[cmd.index("--prompt") + 1] == "a prompt"
+    assert cmd[cmd.index("--seed") + 1] == "42"
+
+    monkeypatch.setattr("horrorvibes.imagegen.shutil.which", lambda name: None)
+    with pytest.raises(ImageGenerationError, match="not found"):
+        backend("p", 0, tmp_path / "o.png")
+
+
+def test_mflux_failure_raises_so_chain_falls_through(tmp_path, monkeypatch):
+    config = load_config(tmp_path / "missing.yaml").image
+    monkeypatch.setattr("horrorvibes.imagegen.shutil.which", lambda name: "/usr/bin/mflux")
+    def runner(cmd, **kwargs):
+        return SimpleNamespace(returncode=1, stderr="oom")
+
+    with pytest.raises(ImageGenerationError, match="oom"):
+        MfluxBackend(config, runner=runner)("p", 0, tmp_path / "o.png")

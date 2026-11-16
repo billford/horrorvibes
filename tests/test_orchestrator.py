@@ -8,12 +8,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from horrorvibes import imagegen, musicgen, publish, video, voiceover
+from horrorvibes import compositor, imagegen, musicgen, publish, video, voiceover
 from horrorvibes.config import load_config
-from horrorvibes.exceptions import PublishError, QuoteGenerationError
+from horrorvibes.exceptions import PublishError, QuoteGenerationError, VideoAssemblyError
 from horrorvibes.orchestrator import (
     _archive_completed_video,
     _compute_quote_schedule,
+    caption_state_times,
     _external_drive_available,
     is_run_due,
     main_unattended,
@@ -69,12 +70,37 @@ def config(tmp_path):
     )
     return dataclasses.replace(
         base,
+        episodes=dataclasses.replace(
+            base.episodes, enabled=False, history_path=tmp_path / "episode_history.jsonl"
+        ),
+        motion=dataclasses.replace(base.motion, enabled=False),
         run=rooted_run,
         quotes=rooted_quotes,
         music=rooted_music,
         publish=rooted_publish,
         automation=rooted_automation,
     )
+
+
+@pytest.fixture(autouse=True)
+def stub_text_layers(monkeypatch):
+    """Text rendering is covered in test_compositor; here the fake images
+    aren't decodable, so layer rendering and flattening are stubbed."""
+
+    def fake_layers(quote_text, movie_title, pack, comp_cfg, width, height, out_dir, index, karaoke=True):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        title = _write(out_dir / f"title_{index + 1}.png")
+        states = [_write(out_dir / f"words_{index + 1}_{k:02d}.png") for k in range(3 if karaoke else 1)]
+        return compositor.TextLayers(title=title, word_states=states, word_count=len(states) - 1 or 1)
+
+    monkeypatch.setattr(compositor, "render_text_layers", fake_layers)
+    monkeypatch.setattr(
+        compositor, "flatten_frame", lambda bg, layers, width, height, output_path: _write(output_path)
+    )
+
+
+def _n(path):
+    return voiceover.Narration(path=path)
 
 
 # ---- is_run_due / record_run -------------------------------------------------
@@ -152,7 +178,7 @@ def test_compute_quote_schedule_keeps_nominal_duration_for_short_narration(confi
     config = dataclasses.replace(config, run=dataclasses.replace(config.run, duration_per_quote_sec=10))
     monkeypatch.setattr(voiceover, "narration_duration_sec", lambda path: 3.0)  # well under 10s
 
-    quote_durations, start_offsets, _ = _compute_quote_schedule(config, [tmp_path / "n1.mp3", None])
+    quote_durations, start_offsets, _ = _compute_quote_schedule(config, [_n(tmp_path / "n1.mp3"), None])
 
     assert quote_durations == [10.0, 10.0]
     assert start_offsets == [0.0, 10.0]
@@ -172,7 +198,7 @@ def test_compute_quote_schedule_stretches_duration_for_long_narration(config, mo
     monkeypatch.setattr(voiceover, "narration_duration_sec", lambda path: durations_by_path[path.name])
 
     quote_durations, start_offsets, narration_durations = _compute_quote_schedule(
-        config, [tmp_path / "n1.mp3", tmp_path / "n2.mp3"]
+        config, [_n(tmp_path / "n1.mp3"), _n(tmp_path / "n2.mp3")]
     )
 
     assert quote_durations == [16.0, 10.0]  # 15.0 + 1.0 pad, then back to nominal
@@ -185,7 +211,7 @@ def test_compute_quote_schedule_treats_failed_narration_as_nominal_duration(conf
     monkeypatch.setattr(voiceover, "narration_duration_sec", lambda path: 15.0)
 
     quote_durations, start_offsets, narration_durations = _compute_quote_schedule(
-        config, [None, tmp_path / "n2.mp3"]
+        config, [None, _n(tmp_path / "n2.mp3")]
     )
 
     assert quote_durations == [10.0, 16.0]
@@ -199,7 +225,7 @@ def test_compute_quote_schedule_treats_failed_narration_as_nominal_duration(conf
 def test_run_pipeline_generates_expected_number_of_frames_and_video(config, monkeypatch):
     chat_client = FakeChatClient(["'A' - Movie1\n'B' - Movie2"])
 
-    def fake_generate_image(quote, index, cfg, images_dir, backends=None):
+    def fake_generate_image(quote, index, cfg, images_dir, backends=None, **kwargs):
         path = images_dir / f"background_{index + 1}.png"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"img")
@@ -213,15 +239,9 @@ def test_run_pipeline_generates_expected_number_of_frames_and_video(config, monk
         output_path.write_bytes(b"video")
         return output_path
 
-    def fake_compose_frame(image_path, quote, comp_cfg, width, height, output_path):
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(b"frame")
-        return output_path
-
     monkeypatch.setattr(imagegen, "generate_image", fake_generate_image)
     monkeypatch.setattr(musicgen, "generate_music", fake_generate_music)
     monkeypatch.setattr(video, "assemble_video", fake_assemble_video)
-    monkeypatch.setattr("horrorvibes.orchestrator.compositor.compose_frame", fake_compose_frame)
 
     config = dataclasses.replace(config, publish=dataclasses.replace(config.publish, youtube_upload=False))
 
@@ -319,10 +339,6 @@ def test_run_pipeline_reuses_one_image_backend_set_across_all_quotes(config, mon
 
     monkeypatch.setattr(imagegen, "default_backends", fake_default_backends)
     monkeypatch.setattr(
-        "horrorvibes.orchestrator.compositor.compose_frame",
-        lambda image_path, quote, comp_cfg, width, height, output_path: _write(output_path),
-    )
-    monkeypatch.setattr(
         musicgen,
         "generate_music",
         lambda cfg, output_path, **kwargs: musicgen.MusicResult(
@@ -356,13 +372,9 @@ def test_run_pipeline_forwards_elevenlabs_api_key_to_generate_music(config, monk
     monkeypatch.setattr(
         imagegen,
         "generate_image",
-        lambda quote, index, cfg, images_dir, backends=None: imagegen.ImageResult(
+        lambda quote, index, cfg, images_dir, backends=None, **kwargs: imagegen.ImageResult(
             path=_write(images_dir / f"background_{index + 1}.png"), backend_used="gradient"
         ),
-    )
-    monkeypatch.setattr(
-        "horrorvibes.orchestrator.compositor.compose_frame",
-        lambda image_path, quote, comp_cfg, width, height, output_path: _write(output_path),
     )
     monkeypatch.setattr(
         video,
@@ -386,13 +398,9 @@ def _mock_non_voiceover_stages(monkeypatch, music_backend="local"):
     monkeypatch.setattr(
         imagegen,
         "generate_image",
-        lambda quote, index, cfg, images_dir, backends=None: imagegen.ImageResult(
+        lambda quote, index, cfg, images_dir, backends=None, **kwargs: imagegen.ImageResult(
             path=_write(images_dir / f"background_{index + 1}.png"), backend_used="gradient"
         ),
-    )
-    monkeypatch.setattr(
-        "horrorvibes.orchestrator.compositor.compose_frame",
-        lambda image_path, quote, comp_cfg, width, height, output_path: _write(output_path),
     )
     monkeypatch.setattr(
         musicgen,
@@ -435,9 +443,9 @@ def test_run_pipeline_mixes_narration_when_voiceover_enabled(config, monkeypatch
     monkeypatch.setattr(
         voiceover,
         "generate_narrations",
-        lambda voiceover_cfg, quotes, output_dir, api_key=None, backend=None: [
-            _write(output_dir / "narration_1.mp3"),
-            _write(output_dir / "narration_2.mp3"),
+        lambda voiceover_cfg, quotes, output_dir, api_key=None, backend=None, voice_id=None: [
+            _n(_write(output_dir / "narration_1.mp3")),
+            _n(_write(output_dir / "narration_2.mp3")),
         ],
     )
     monkeypatch.setattr(voiceover, "narration_duration_sec", lambda path: 2.0)
@@ -469,9 +477,9 @@ def test_run_pipeline_stretches_video_and_music_for_long_narration(config, monke
     monkeypatch.setattr(
         voiceover,
         "generate_narrations",
-        lambda voiceover_cfg, quotes, output_dir, api_key=None, backend=None: [
-            _write(output_dir / "narration_1.mp3"),
-            _write(output_dir / "narration_2.mp3"),
+        lambda voiceover_cfg, quotes, output_dir, api_key=None, backend=None, voice_id=None: [
+            _n(_write(output_dir / "narration_1.mp3")),
+            _n(_write(output_dir / "narration_2.mp3")),
         ],
     )
     durations_by_name = {"narration_1.mp3": 15.0, "narration_2.mp3": 2.0}
@@ -510,7 +518,7 @@ def test_run_pipeline_falls_back_to_music_when_all_narrations_fail(config, monke
     monkeypatch.setattr(
         voiceover,
         "generate_narrations",
-        lambda voiceover_cfg, quotes, output_dir, api_key=None, backend=None: [None, None],
+        lambda voiceover_cfg, quotes, output_dir, api_key=None, backend=None, voice_id=None: [None, None],
     )
 
     config = dataclasses.replace(
@@ -532,8 +540,8 @@ def test_run_pipeline_falls_back_to_music_when_mix_ffmpeg_fails(config, monkeypa
     monkeypatch.setattr(
         voiceover,
         "generate_narrations",
-        lambda voiceover_cfg, quotes, output_dir, api_key=None, backend=None: [
-            _write(output_dir / "narration_1.mp3"),
+        lambda voiceover_cfg, quotes, output_dir, api_key=None, backend=None, voice_id=None: [
+            _n(_write(output_dir / "narration_1.mp3")),
             None,
         ],
     )
@@ -630,7 +638,7 @@ def test_run_pipeline_skips_upload_and_logs_when_publish_fails(config, monkeypat
     monkeypatch.setattr(
         imagegen,
         "generate_image",
-        lambda quote, index, cfg, images_dir, backends=None: imagegen.ImageResult(
+        lambda quote, index, cfg, images_dir, backends=None, **kwargs: imagegen.ImageResult(
             path=_write(images_dir / f"background_{index + 1}.png"), backend_used="gradient"
         ),
     )
@@ -645,10 +653,6 @@ def test_run_pipeline_skips_upload_and_logs_when_publish_fails(config, monkeypat
         video,
         "assemble_video",
         lambda frame_paths, output_path, audio_path, duration_per_frame, fps, runner: _write(output_path),
-    )
-    monkeypatch.setattr(
-        "horrorvibes.orchestrator.compositor.compose_frame",
-        lambda image_path, quote, comp_cfg, width, height, output_path: _write(output_path),
     )
 
     def failing_publish(*args, **kwargs):  # pylint: disable=unused-argument
@@ -725,3 +729,102 @@ def test_archive_completed_video_gives_up_on_a_hung_copy(config, tmp_path, monke
     release.set()
 
     assert any("did not finish" in r.message for r in caplog.records)
+
+
+# ---- episodes, style packs & motion ----------------------------------------------------
+
+
+def test_caption_state_times_prefers_api_timings_then_estimates():
+    states = [Path("a"), Path("b"), Path("c")]
+    layers = compositor.TextLayers(title=Path("t"), word_states=states, word_count=2)
+    timed = voiceover.Narration(path=Path("n.mp3"), word_starts=[0.2, 0.9])
+    assert caption_state_times(layers, timed, 2.0, 10.0) == [0.0, 0.2, 0.9]
+
+    estimated = caption_state_times(layers, voiceover.Narration(path=Path("n.mp3")), 2.0, 10.0)
+    assert estimated[0] == 0.0 and len(estimated) == 3 and estimated[-1] < 2.0
+
+    silent = caption_state_times(layers, None, None, 10.0)
+    assert silent[1] == 0.6 and silent[-1] < 6.0
+
+    static = compositor.TextLayers(title=Path("t"), word_states=[Path("a")], word_count=2)
+    assert caption_state_times(static, timed, 2.0, 10.0) == [0.4]
+
+
+def _motion_config(config):
+    return dataclasses.replace(
+        config,
+        motion=dataclasses.replace(config.motion, enabled=True),
+        publish=dataclasses.replace(config.publish, youtube_upload=False),
+    )
+
+
+def test_run_pipeline_uses_motion_assembly_with_pack_style(config, monkeypatch):
+    static_calls, _ = _mock_non_voiceover_stages(monkeypatch)
+    motion_calls = []
+
+    def fake_motion(clips, output_path, audio_path, style, transitions, width, height, fps, runner, **kwargs):
+        motion_calls.append((clips, style, transitions))
+        return _write(output_path)
+
+    monkeypatch.setattr(video, "assemble_motion_video", fake_motion)
+    config = _motion_config(config)
+
+    run_pipeline(config, FakeChatClient(["'A' - Movie1\n'B' - Movie2"]))
+
+    clips, style, transitions = motion_calls[0]
+    assert static_calls == []
+    assert len(clips) == 2 and clips[0].zoom_in and not clips[1].zoom_in
+    pack_names = {p.name: p for p in config.style_packs}
+    assert len(transitions) == 1
+    assert any(style.grade == p.grade and transitions[0] in p.transitions for p in pack_names.values())
+
+
+def test_run_pipeline_falls_back_to_static_when_motion_fails(config, monkeypatch, caplog):
+    static_calls, _ = _mock_non_voiceover_stages(monkeypatch)
+
+    def broken_motion(*args, **kwargs):
+        raise VideoAssemblyError("xfade exploded")
+
+    monkeypatch.setattr(video, "assemble_motion_video", broken_motion)
+
+    result = run_pipeline(_motion_config(config), FakeChatClient(["'A' - Movie1\n'B' - Movie2"]))
+
+    assert len(static_calls) == 1 and result.video_path.exists()
+    assert "falling back to static" in caplog.text
+
+
+def test_run_pipeline_records_episode_and_passes_pack_to_stages(config, monkeypatch):
+    _mock_non_voiceover_stages(monkeypatch)
+    image_kwargs, music_kwargs, published = [], [], {}
+    monkeypatch.setattr(
+        imagegen, "generate_image",
+        lambda quote, index, cfg, images_dir, backends=None, **kwargs: (
+            image_kwargs.append(kwargs),
+            imagegen.ImageResult(path=_write(images_dir / f"bg_{index}.png"), backend_used="mflux"),
+        )[1],
+    )
+    monkeypatch.setattr(
+        musicgen, "generate_music",
+        lambda cfg, output_path, **kwargs: (
+            music_kwargs.append(kwargs),
+            musicgen.MusicResult(path=_write(output_path), backend_used="local"),
+        )[1],
+    )
+    monkeypatch.setattr(
+        publish, "publish",
+        lambda path, title, description, tags, cfg: published.update(title=title) or "yt-id",
+    )
+    config = dataclasses.replace(
+        config, episodes=dataclasses.replace(config.episodes, enabled=True, themed_share=0.0)
+    )
+
+    run_pipeline(config, FakeChatClient(["'A' - Movie1\n'B' - Movie2\n'C' - Movie3"]), quote_count=3)
+
+    history = [json.loads(line) for line in config.episodes.history_path.read_text().splitlines()]
+    pack = next(p for p in config.style_packs if p.name == history[0]["pack"])
+    assert history[0]["format"] == "mixed"
+    assert image_kwargs[0]["style"] == pack.image_style
+    assert music_kwargs[0]["mood_anchor"] == pack.music_mood_anchor
+    assert published["title"].startswith(tuple(h.format(n=3)[:12] for h in config.episodes.mixed_headlines))
+    entry = json.loads(config.run.video_catalog_path.read_text().splitlines()[0])
+    assert entry["style_pack"] == pack.name and entry["episode_format"] == "mixed"

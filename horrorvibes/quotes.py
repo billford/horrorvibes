@@ -44,6 +44,12 @@ _EARLIEST_TV_DECADE = 1950
 
 _CONFIDENCE_LEVELS = ("high", "medium", "low")
 
+# ElevenLabs v3 audio tags the model may choose for narration delivery.
+DELIVERY_TAGS = (
+    "whispers", "menacing", "calm", "sinister", "terrified", "sad",
+    "mocking", "desperate", "cold", "excited", "tired", "crying",
+)
+
 QUOTES_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -59,8 +65,13 @@ QUOTES_SCHEMA: dict[str, Any] = {
                     "medium": {"type": "string", "enum": ["film", "tv"]},
                     "speaker": {"type": "string"},
                     "confidence": {"type": "string", "enum": list(_CONFIDENCE_LEVELS)},
+                    "visual_scene": {"type": "string"},
+                    "delivery": {"type": "string", "enum": list(DELIVERY_TAGS)},
                 },
-                "required": ["slot", "quote", "title", "year", "medium", "speaker", "confidence"],
+                "required": [
+                    "slot", "quote", "title", "year", "medium", "speaker", "confidence",
+                    "visual_scene", "delivery",
+                ],
                 "additionalProperties": False,
             },
         }
@@ -106,7 +117,12 @@ _SYSTEM_PROMPT = (
     "4. Prefer lines that stand alone out of context, land in under 25 words, and would read "
     "well over a dark image. When a film has one overwhelmingly famous line, prefer another "
     "memorable line from it if you know one accurately.\n"
-    "Give the quote text without surrounding quotation marks."
+    "Give the quote text without surrounding quotation marks.\n"
+    "For each line also give:\n"
+    "- visual_scene: one or two sentences describing an ORIGINAL image that evokes the line -- "
+    "setting, light, objects, weather, atmosphere. Never depict the actual film's actors, "
+    "recognisable characters, costumes or logos; no text or lettering; no gore.\n"
+    "- delivery: how a narrator should voice the line, matching how it is said in the scene."
 )
 
 _VERIFY_PROMPT = (
@@ -149,13 +165,21 @@ class QuoteCandidate:
     medium: str
     speaker: str
     confidence: str
+    visual_scene: str = ""
+    delivery: str = ""
+
+    @property
+    def display_text(self) -> str:
+        """The quote as shown and narrated: no wrapping quote marks, and a
+        literal " - " (which would read as the title separator) as an em dash."""
+        return self.quote.strip().strip("\"'“”‘’").replace(" - ", " — ")
 
     def to_line(self) -> str:
         """Legacy ``"QUOTE" - TITLE (YEAR)`` form used throughout the pipeline.
 
         A literal " - " inside the quote would be mistaken for the title
         separator downstream, so it becomes an em dash."""
-        text = self.quote.strip().strip("\"'“”‘’").replace(" - ", " — ")
+        text = self.display_text
         title = self.title.strip()
         return f'"{text}" - {title} ({self.year})' if self.year else f'"{text}" - {title}'
 
@@ -358,9 +382,12 @@ def build_quote_request(
     briefs: list[SlotBrief],
     excluded_titles: list[str],
     excluded_quotes: list[str],
+    instruction: str | None = None,
 ) -> QuoteRequest:
     """Build the generation request for one attempt. Pure function -- no I/O."""
     lines = [f"Give exactly {len(briefs)} quotes, one per slot:"]
+    if instruction:
+        lines.insert(0, f"Episode theme: {instruction}")
     lines += [f"{i}. {brief.describe()}" for i, brief in enumerate(briefs, start=1)]
     if excluded_titles:
         lines += ["", "Excluded titles (used recently -- do not quote these):", "; ".join(excluded_titles)]
@@ -413,6 +440,8 @@ def parse_candidates(payload: dict[str, Any]) -> list[QuoteCandidate]:
                     medium=str(item.get("medium", "film")),
                     speaker=str(item.get("speaker", "")).strip(),
                     confidence=str(item.get("confidence", "low")),
+                    visual_scene=str(item.get("visual_scene", "")).strip(),
+                    delivery=str(item.get("delivery", "")).strip(),
                 )
             )
         except (KeyError, TypeError, ValueError):
@@ -483,7 +512,7 @@ def _filter_candidates(
 # ---- main entry -----------------------------------------------------------------
 
 
-def generate_quotes(  # pylint: disable=too-many-arguments,too-many-locals
+def generate_quotes(  # pylint: disable=too-many-arguments
     client: ResponsesClient,
     quotes_config: QuotesConfig,
     count: int,
@@ -492,6 +521,23 @@ def generate_quotes(  # pylint: disable=too-many-arguments,too-many-locals
     now: Callable[[], datetime] | None = None,  # pylint: disable=unused-argument
     recent_movies: set[str] | None = None,
 ) -> list[str]:
+    """Like ``generate_quote_candidates`` but returns legacy
+    ``"QUOTE" - TITLE (YEAR)`` lines."""
+    candidates = generate_quote_candidates(
+        client, quotes_config, count, history_path, rng=rng, recent_movies=recent_movies
+    )
+    return [candidate.to_line() for candidate in candidates]
+
+
+def generate_quote_candidates(  # pylint: disable=too-many-arguments,too-many-locals
+    client: ResponsesClient,
+    quotes_config: QuotesConfig,
+    count: int,
+    history_path: Path,
+    rng: random.Random | None = None,
+    recent_movies: set[str] | None = None,
+    instruction: str | None = None,
+) -> list[QuoteCandidate]:
     """Generate up to ``count`` fresh horror quotes, each from a distinct
     title not used recently, none a near-duplicate of a past quote.
 
@@ -520,6 +566,7 @@ def generate_quotes(  # pylint: disable=too-many-arguments,too-many-locals
             build_slot_briefs(quotes_config, remaining, rng),
             excluded_titles=sorted(avoided_movies)[:limit],
             excluded_quotes=(recent_quote_texts + [c.quote for c in accepted])[-limit:] if limit else [],
+            instruction=instruction,
         )
         logger.info("Attempt %d/%d requesting %d quotes", attempt, quotes_config.max_attempts, remaining)
         try:
@@ -546,4 +593,4 @@ def generate_quotes(  # pylint: disable=too-many-arguments,too-many-locals
     if len(accepted) < count:
         logger.warning("Only got %d unique quotes out of %d requested", len(accepted), count)
 
-    return [candidate.to_line() for candidate in accepted]
+    return accepted

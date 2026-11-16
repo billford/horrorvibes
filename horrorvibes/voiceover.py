@@ -18,23 +18,52 @@ the per-item resilience pattern used elsewhere (imagegen, compositor).
 
 from __future__ import annotations
 
+import base64
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 from horrorvibes.config import VoiceoverConfig
 from horrorvibes.musicgen import with_retries
-from horrorvibes.textutil import split_quote_and_title
 
 logger = logging.getLogger(__name__)
 
 _ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 
-NarrationBackend = Callable[[str, Path], None]
+# eleven_v3 only accepts these stability values (Creative / Natural / Robust).
+_V3_STABILITY_STEPS = (0.0, 0.5, 1.0)
+
+
+@dataclass(frozen=True)
+class NarrationItem:
+    """What to say for one quote, and how."""
+
+    text: str
+    delivery: str = ""
+
+
+@dataclass(frozen=True)
+class Narration:
+    """One generated clip, plus each caption word's start time (seconds into
+    the clip) when the API returned character timings."""
+
+    path: Path
+    word_starts: list[float] | None = None
+
+
+# backend(text, output_path, model_id, voice_id) -> alignment dict or None
+NarrationBackend = Callable[[str, Path, str, str], "dict | None"]
+
+
+def _is_v3(model_id: str) -> bool:
+    return model_id.startswith("eleven_v3")
 
 
 class ElevenLabsVoiceoverBackend:
-    """Calls the ElevenLabs text-to-speech API (audio bytes response)."""
+    """Calls the ElevenLabs text-to-speech API. With ``use_timestamps`` it
+    uses the /with-timestamps variant (JSON: base64 audio + character
+    alignment) so captions can be synced to the actual speech."""
 
     def __init__(self, config: VoiceoverConfig, api_key: str | None, session=None) -> None:
         self._config = config
@@ -48,31 +77,45 @@ class ElevenLabsVoiceoverBackend:
             self._session = requests.Session()
         return self._session
 
-    def _request_once(self, text: str, output_path: Path) -> None:
+    def voice_settings(self, model_id: str) -> dict:
+        """v3 takes a stepped stability and none of the v2 style/speed knobs."""
+        if _is_v3(model_id):
+            stability = min(_V3_STABILITY_STEPS, key=lambda step: abs(step - self._config.stability))
+            return {
+                "stability": stability,
+                "similarity_boost": self._config.similarity_boost,
+                "use_speaker_boost": self._config.use_speaker_boost,
+            }
+        return {
+            "stability": self._config.stability,
+            "similarity_boost": self._config.similarity_boost,
+            "style": self._config.style,
+            "use_speaker_boost": self._config.use_speaker_boost,
+            "speed": self._config.speed,
+        }
+
+    def _request_once(self, text: str, output_path: Path, model_id: str, voice_id: str) -> dict | None:
         session = self._session_or_default()
-        url = _ELEVENLABS_TTS_URL.format(voice_id=self._config.voice_id)
+        url = _ELEVENLABS_TTS_URL.format(voice_id=voice_id)
+        if self._config.use_timestamps:
+            url += "/with-timestamps"
         response = session.post(
             url,
             headers={"xi-api-key": self._api_key or ""},
-            json={
-                "text": text,
-                "model_id": self._config.model_id,
-                "voice_settings": {
-                    "stability": self._config.stability,
-                    "similarity_boost": self._config.similarity_boost,
-                    "style": self._config.style,
-                    "use_speaker_boost": self._config.use_speaker_boost,
-                    "speed": self._config.speed,
-                },
-            },
+            json={"text": text, "model_id": model_id, "voice_settings": self.voice_settings(model_id)},
             timeout=self._config.api_timeout_sec,
         )
         response.raise_for_status()
-        output_path.write_bytes(response.content)
+        if not self._config.use_timestamps:
+            output_path.write_bytes(response.content)
+            return None
+        payload = response.json()
+        output_path.write_bytes(base64.b64decode(payload["audio_base64"]))
+        return payload.get("alignment") or payload.get("normalized_alignment")
 
-    def __call__(self, text: str, output_path: Path) -> None:
-        with_retries(
-            lambda: self._request_once(text, output_path),
+    def __call__(self, text: str, output_path: Path, model_id: str, voice_id: str) -> dict | None:
+        return with_retries(
+            lambda: self._request_once(text, output_path, model_id, voice_id),
             self._config.max_retries,
             self._config.retry_backoff_sec,
         )
@@ -83,32 +126,114 @@ def default_backend(config: VoiceoverConfig, api_key: str | None) -> NarrationBa
     return ElevenLabsVoiceoverBackend(config, api_key)
 
 
-def generate_narrations(
+def spoken_text(item: NarrationItem, tagged: bool) -> str:
+    """The text sent to TTS: the quote, prefixed with a v3 audio tag if asked."""
+    if tagged and item.delivery:
+        return f"[{item.delivery}] {item.text}"
+    return item.text
+
+
+def word_starts_from_alignment(alignment: dict | None) -> list[float] | None:
+    """Start time of each whitespace-separated word, skipping [audio tags]."""
+    if not alignment:
+        return None
+    chars = alignment.get("characters") or []
+    starts = alignment.get("character_start_times_seconds") or []
+    if not chars or len(chars) != len(starts):
+        return None
+
+    words: list[float] = []
+    current: float | None = None
+    in_tag = False
+    for char, start in zip(chars, starts):
+        if in_tag:
+            in_tag = char != "]"
+            continue
+        if char == "[":
+            in_tag = True
+            continue
+        if char.isspace():
+            if current is not None:
+                words.append(float(current))
+                current = None
+        elif current is None:
+            current = start
+    if current is not None:
+        words.append(float(current))
+    return words
+
+
+def estimate_word_starts(words: list[str], duration_sec: float, lead_sec: float = 0.1) -> list[float]:
+    """Spread word starts across a clip in proportion to word length -- the
+    fallback when the API gives no timings."""
+    if not words:
+        return []
+    weights = [len(word) + 1 for word in words]
+    span = max(duration_sec - lead_sec, 0.1)
+    total = sum(weights)
+    starts, cursor = [], lead_sec
+    for weight in weights:
+        starts.append(round(cursor, 3))
+        cursor += span * weight / total
+    return starts
+
+
+def _attempt_plan(config: VoiceoverConfig, voice_id: str) -> list[tuple[str, str, bool]]:
+    """(model, voice, tagged) attempts in order: primary model with delivery
+    tags, then the fallback model untagged, then the default voice."""
+    tagged = config.use_delivery_tags and _is_v3(config.model_id)
+    plan = [(config.model_id, voice_id, tagged)]
+    if config.fallback_model_id and config.fallback_model_id != config.model_id:
+        plan.append((config.fallback_model_id, voice_id, False))
+    if voice_id != config.voice_id:
+        last_model = config.fallback_model_id or config.model_id
+        plan.append((last_model, config.voice_id, tagged and last_model == config.model_id))
+    return plan
+
+
+def generate_narrations(  # pylint: disable=too-many-arguments,too-many-locals
     config: VoiceoverConfig,
-    quotes: list[str],
+    items: list[NarrationItem],
     output_dir: Path,
     api_key: str | None = None,
     backend: NarrationBackend | None = None,
-) -> list[Path | None]:
-    """Generate one narration clip per quote (just the quote text, not the
-    movie title). Returns a list aligned with ``quotes`` -- ``None`` for any
-    quote whose narration failed, so the caller can skip it rather than
-    fail the whole run."""
+    voice_id: str | None = None,
+) -> list[Narration | None]:
+    """One clip per item, aligned with ``items`` -- ``None`` where every
+    attempt failed, so the caller can skip that quote's narration rather
+    than fail the run. A (model, voice) pair that failed once (after its
+    own retries) is not tried again for later items in this run."""
     backend = backend if backend is not None else default_backend(config, api_key)
     output_dir.mkdir(parents=True, exist_ok=True)
+    plan = _attempt_plan(config, voice_id or config.voice_id)
+    dead: set[tuple[str, str]] = set()
 
-    results: list[Path | None] = []
-    for i, quote in enumerate(quotes):
-        quote_text, _ = split_quote_and_title(quote)
+    results: list[Narration | None] = []
+    for i, item in enumerate(items):
         output_path = output_dir / f"narration_{i + 1}.mp3"
-        try:
-            backend(quote_text, output_path)
-        except Exception:  # pylint: disable=broad-except
-            logger.warning("Narration failed for quote %d, skipping", i + 1, exc_info=True)
-            results.append(None)
-            continue
-        logger.info("Narration generated for quote %d", i + 1)
-        results.append(output_path)
+        result: Narration | None = None
+        for model_id, voice, tagged in plan:
+            if (model_id, voice) in dead:
+                continue
+            text = spoken_text(item, tagged)
+            try:
+                alignment = backend(text, output_path, model_id, voice)
+            except Exception:  # pylint: disable=broad-except
+                logger.warning(
+                    "Narration failed for quote %d (model=%s voice=%s)", i + 1, model_id, voice, exc_info=True
+                )
+                dead.add((model_id, voice))
+                continue
+            starts = word_starts_from_alignment(alignment)
+            if starts is not None and len(starts) != len(item.text.split()):
+                logger.debug("Alignment word count mismatch for quote %d; will estimate", i + 1)
+                starts = None
+            result = Narration(path=output_path, word_starts=starts)
+            logger.info("Narration generated for quote %d via %s", i + 1, model_id)
+            break
+        if result is None:
+            logger.warning("Narration failed for quote %d on every model/voice, skipping", i + 1)
+        results.append(result)
     return results
 
 

@@ -47,11 +47,11 @@ def build_video_hashtags(quotes: list[str], max_tags: int = 15) -> list[str]:
     return tags[:max_tags]
 
 
-def build_video_title(quotes: list[str], max_movies: int = 3) -> str:
+def build_video_title(quotes: list[str], max_movies: int = 3, headline: str | None = None) -> str:
     """A content-specific title naming a few of the featured films, within
     YouTube's title length limit. Drops whole movie names (starting from
     the last) rather than truncating mid-word if the full list doesn't fit."""
-    base = f"{len(quotes)} Bone-Chilling Horror Quotes"
+    base = (headline or f"{len(quotes)} Bone-Chilling Horror Quotes")[:_MAX_TITLE_LEN]
     movies = featured_movies(quotes)
     if not movies:
         return base
@@ -65,10 +65,15 @@ def build_video_title(quotes: list[str], max_movies: int = 3) -> str:
     return base  # naming even one movie didn't fit -- fall back to the base title alone
 
 
-def build_video_description(quotes: list[str]) -> str:
+def build_video_description(quotes: list[str], headline: str | None = None) -> str:
     """Lists every quote and its film -- an actually useful, searchable
     description instead of generic boilerplate -- plus hashtags."""
-    lines = ["A collection of the most spine-chilling quotes from horror movies and TV shows:", ""]
+    intro = (
+        f"{headline}."
+        if headline
+        else "A collection of the most spine-chilling quotes from horror movies and TV shows:"
+    )
+    lines = [intro, ""]
     for i, quote in enumerate(quotes, start=1):
         quote_text, movie = split_quote_and_title(quote)
         lines.append(f"{i}. {quote_text} — {movie}")

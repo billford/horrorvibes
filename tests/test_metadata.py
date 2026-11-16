@@ -67,3 +67,10 @@ def test_build_video_description_lists_every_quote_and_movie():
     assert "1. 'He came home.' — Halloween (1978)" in description
     assert "2. 'Whatever you do, don't fall asleep.' — A Nightmare on Elm Street (1984)" in description
     assert "#horror" in description
+
+
+def test_title_and_description_use_episode_headline():
+    quotes = ["'A' - Halloween (1978)", "'B' - Alien (1979)"]
+    title = build_video_title(quotes, headline="Folk Horror Night: 2 Quotes")
+    assert title.startswith("Folk Horror Night: 2 Quotes | Halloween")
+    assert build_video_description(quotes, headline="Folk Horror Night").startswith("Folk Horror Night.")

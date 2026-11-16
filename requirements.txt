@@ -37,6 +37,9 @@ accelerate>=0.27.0
 soundfile>=0.12.0
 torchsde>=0.2.5
 
+# Optional, Apple Silicon only (default image backend): pip install mflux
+# Not listed here because MLX doesn't install on the Linux CI runners.
+
 # Dev / quality tooling
 pytest>=7.4.0
 pylint>=3.0.0

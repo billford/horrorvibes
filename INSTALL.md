@@ -121,6 +121,18 @@ pip install google-api-python-client # YouTube API client
 pip install tqdm                     # Progress bars
 ```
 
+### 3b. Install mflux (Apple Silicon, recommended)
+
+The default image backend is FLUX.2 Klein through mflux:
+
+```bash
+pip install mflux
+mflux-generate-flux2 --help   # confirm the command is on PATH inside the venv
+```
+
+The first generation downloads the model weights. If mflux isn't installed, runs fall back to local SDXL
+automatically.
+
 ### 4. Set Up OpenAI API Key
 
 #### Get an OpenAI API Key:

@@ -1,13 +1,19 @@
 # pylint: disable=missing-function-docstring,missing-class-docstring,redefined-outer-name,unused-argument,unnecessary-lambda,import-outside-toplevel,use-implicit-booleaness-not-comparison
 
+import base64
+import dataclasses
+
 import pytest
 
 from horrorvibes.config import load_config
 from horrorvibes.voiceover import (
     ElevenLabsVoiceoverBackend,
+    NarrationItem,
     build_ducked_mix_cmd,
+    estimate_word_starts,
     generate_narrations,
     narration_duration_sec,
+    word_starts_from_alignment,
 )
 
 
@@ -17,13 +23,17 @@ def voiceover_config(tmp_path):
 
 
 class FakeResponse:
-    def __init__(self, content=b"speech-bytes", status_ok=True):
+    def __init__(self, content=b"speech-bytes", payload=None, status_ok=True):
         self.content = content
+        self._payload = payload
         self._status_ok = status_ok
 
     def raise_for_status(self):
         if not self._status_ok:
             raise RuntimeError("HTTP error")
+
+    def json(self):
+        return self._payload
 
 
 class FakeSession:
@@ -39,49 +49,122 @@ class FakeSession:
         return item
 
 
-def test_elevenlabs_backend_writes_response_bytes_and_uses_voice_id(voiceover_config, tmp_path):
-    session = FakeSession([FakeResponse(content=b"narration-bytes")])
+def _alignment(text, step=0.1):
+    return {
+        "characters": list(text),
+        "character_start_times_seconds": [round(i * step, 3) for i in range(len(text))],
+        "character_end_times_seconds": [round((i + 1) * step, 3) for i in range(len(text))],
+    }
+
+
+def test_backend_with_timestamps_decodes_audio_and_returns_alignment(voiceover_config, tmp_path):
+    payload = {"audio_base64": base64.b64encode(b"narration-bytes").decode(), "alignment": _alignment("Hi")}
+    session = FakeSession([FakeResponse(payload=payload)])
     backend = ElevenLabsVoiceoverBackend(voiceover_config, api_key="secret", session=session)
     output_path = tmp_path / "narration_1.mp3"
 
-    backend("Redrum.", output_path)
+    alignment = backend("[whispers] Redrum.", output_path, "eleven_v3", "voice-x")
 
     assert output_path.read_bytes() == b"narration-bytes"
-    assert voiceover_config.voice_id in session.requests[0]["url"]
-    assert session.requests[0]["headers"]["xi-api-key"] == "secret"
-    assert session.requests[0]["json"]["text"] == "Redrum."
+    assert alignment["characters"] == ["H", "i"]
+    request = session.requests[0]
+    assert request["url"].endswith("/voice-x/with-timestamps")
+    assert request["headers"]["xi-api-key"] == "secret"
+    assert request["json"]["text"] == "[whispers] Redrum."
+    assert request["json"]["model_id"] == "eleven_v3"
 
 
-def test_generate_narrations_succeeds_for_every_quote(tmp_path, voiceover_config):
+def test_backend_without_timestamps_writes_raw_bytes(voiceover_config, tmp_path):
+    config = dataclasses.replace(voiceover_config, use_timestamps=False)
+    session = FakeSession([FakeResponse(content=b"raw")])
+    backend = ElevenLabsVoiceoverBackend(config, api_key="k", session=session)
+
+    assert backend("Hi", tmp_path / "n.mp3", "eleven_multilingual_v2", "v") is None
+    assert (tmp_path / "n.mp3").read_bytes() == b"raw"
+    assert not session.requests[0]["url"].endswith("with-timestamps")
+
+
+def test_voice_settings_v3_snaps_stability_and_drops_v2_knobs(voiceover_config):
+    backend = ElevenLabsVoiceoverBackend(dataclasses.replace(voiceover_config, stability=0.4), api_key="k")
+    v3 = backend.voice_settings("eleven_v3")
+    v2 = backend.voice_settings("eleven_multilingual_v2")
+    assert v3["stability"] == 0.5 and "speed" not in v3 and "style" not in v3
+    assert v2["speed"] == voiceover_config.speed
+
+
+def test_word_starts_skip_audio_tags():
+    starts = word_starts_from_alignment(_alignment("[whispers] Run now"))
+    assert starts == [1.1, 1.5]
+
+
+def test_word_starts_none_for_missing_alignment():
+    assert word_starts_from_alignment(None) is None
+    assert word_starts_from_alignment({"characters": ["a"], "character_start_times_seconds": []}) is None
+
+
+def test_estimate_word_starts_is_monotonic_within_duration():
+    starts = estimate_word_starts(["one", "two", "three"], 3.0)
+    assert starts == sorted(starts) and starts[0] == 0.1 and starts[-1] < 3.0
+
+
+def test_generate_narrations_tags_v3_and_returns_word_starts(tmp_path, voiceover_config):
     calls = []
 
-    def backend(text, output_path):
-        calls.append(text)
+    def backend(text, output_path, model_id, voice_id):
+        calls.append((text, model_id, voice_id))
+        output_path.write_bytes(b"audio")
+        return _alignment(text)
+
+    results = generate_narrations(
+        voiceover_config,
+        [NarrationItem("Redrum.", "whispers"), NarrationItem("They're here.", "calm")],
+        tmp_path / "narration",
+        backend=backend,
+        voice_id="pack-voice",
+    )
+
+    assert calls[0] == ("[whispers] Redrum.", "eleven_v3", "pack-voice")
+    assert results[0].path.name == "narration_1.mp3"
+    assert results[1].word_starts == [0.7, 1.5]  # "[calm] " is 7 chars at 0.1s each
+
+
+def test_generate_narrations_falls_back_to_v2_then_default_voice(tmp_path, voiceover_config):
+    calls = []
+
+    def backend(text, output_path, model_id, voice_id):
+        calls.append((text, model_id, voice_id))
+        if voice_id == "bad-voice":
+            raise RuntimeError("voice not found")
         output_path.write_bytes(b"audio")
 
     results = generate_narrations(
         voiceover_config,
-        ["'Redrum.' - The Shining", "'They're here.' - Poltergeist"],
+        [NarrationItem("A.", "cold"), NarrationItem("B.", "cold")],
         tmp_path / "narration",
         backend=backend,
+        voice_id="bad-voice",
     )
 
-    assert calls == ["'Redrum.'", "'They're here.'"]
-    assert all(r is not None for r in results)
-    assert results[0].name == "narration_1.mp3"
-    assert results[1].name == "narration_2.mp3"
+    assert calls[:3] == [
+        ("[cold] A.", "eleven_v3", "bad-voice"),
+        ("A.", "eleven_multilingual_v2", "bad-voice"),
+        ("A.", "eleven_multilingual_v2", voiceover_config.voice_id),
+    ]
+    # dead (model, voice) pairs aren't retried for the second quote
+    assert calls[3] == ("B.", "eleven_multilingual_v2", voiceover_config.voice_id)
+    assert all(r is not None and r.word_starts is None for r in results)
 
 
 def test_generate_narrations_skips_failed_quotes_without_raising(tmp_path, voiceover_config, caplog):
-    def backend(text, output_path):
-        if "Poltergeist" in text or "here" in text:
+    def backend(text, output_path, model_id, voice_id):
+        if "here" in text:
             raise RuntimeError("tts down")
         output_path.write_bytes(b"audio")
 
     with caplog.at_level("WARNING"):
         results = generate_narrations(
-            voiceover_config,
-            ["'Redrum.' - The Shining", "'They're here.' - Poltergeist"],
+            dataclasses.replace(voiceover_config, fallback_model_id=None),
+            [NarrationItem("Redrum."), NarrationItem("They're here.")],
             tmp_path / "narration",
             backend=backend,
         )

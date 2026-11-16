@@ -23,7 +23,7 @@ run:
 quotes:
   # OpenAI Responses API model (structured JSON output). Confirm the current
   # model name at https://developers.openai.com/api/docs/models before changing.
-  model: gpt-5.5
+  model: gpt-5.6-sol
   reasoning_effort: low
   # Reasoning models reject temperature; leave null to omit it.
   temperature: null
@@ -85,9 +85,17 @@ quotes:
   movie_cooldown_days: 30
 
 image:
-  # local_sd | openai | gradient -- this is the START of the fallback chain,
-  # which always continues local_sd -> openai -> gradient from wherever it starts.
-  backend: local_sd
+  # mflux | local_sd | openai | gradient -- this is the START of the fallback
+  # chain, which always continues mflux -> local_sd -> openai -> gradient.
+  backend: mflux
+  # FLUX.2 Klein via mflux (Apple MLX; `pip install mflux`). If the command
+  # isn't installed or fails, the run falls through to local SDXL below.
+  mflux_command: mflux-generate-flux2
+  mflux_model: flux2-klein-9b
+  mflux_steps: 4
+  mflux_width: 768     # 9:16, divisible by 16; upscaled at render time
+  mflux_height: 1344
+  mflux_timeout_sec: 900
   # Full SDXL base, not sdxl-turbo: turbo's 1-4 step distillation trades away
   # prompt adherence for speed, and images stopped meaningfully relating to
   # their quote/movie as a result (confirmed on a real run 2026-07-14).
@@ -96,8 +104,9 @@ image:
   sd_steps: 30
   sd_guidance_scale: 7.0
   sd_timeout_sec: 300
-  openai_model: gpt-image-1
+  openai_model: gpt-image-2
   openai_timeout_sec: 60
+  # Used only when a run has no style pack image_style (style packs normally set it).
   style_suffix: >-
     expressionist horror painting, dramatic chiaroscuro lighting,
     high-contrast brushwork, bruised muted palette, textured canvas
@@ -136,7 +145,14 @@ music:
 voiceover:
   enabled: true
   voice_id: N2lVS1w4EtoT3dr4eOWO  # "Callum" -- hoarse/intense, chosen 2026-07-15 over Clyde (too scratchy/high-pitched)
-  model_id: eleven_multilingual_v2
+  # eleven_v3 voices each quote with a delivery tag ([whispers], [menacing]...)
+  # chosen by the quote model. A failed v3 request retries on fallback_model_id
+  # (untagged), then on voice_id if the style pack chose a different voice.
+  model_id: eleven_v3
+  fallback_model_id: eleven_multilingual_v2
+  use_delivery_tags: true
+  # Character timings drive word-by-word captions; estimated if unavailable.
+  use_timestamps: true
   stability: 0.5
   similarity_boost: 0.75
   style: 0.3
@@ -171,6 +187,35 @@ publish:
   category_id: "17"
   client_secrets_path: ./client_secret.json
   token_path: ./token.json
+
+# Animated assembly: Ken Burns zoom per quote, style-pack colour grade and
+# film texture, xfade transitions, and word-synced captions. If rendering
+# fails for any reason the run falls back to static frames.
+motion:
+  enabled: true
+  transition_sec: 0.8
+  zoom_amount: 0.10
+  upscale_factor: 1.5
+  caption_mode: karaoke   # karaoke (words light up as narrated) | static
+  crf: 20
+  preset: medium
+
+# Each run is a mixed bag or (themed_share of the time) a themed episode,
+# with 6-12 quotes. When enabled this replaces run.quote_count; --quotes
+# still overrides it. Formats and headlines default to the built-in list in
+# horrorvibes/config.py -- add an `episodes.formats` list here to replace it.
+episodes:
+  enabled: true
+  history_path: ./episode_history.jsonl
+  themed_share: 0.4
+  quote_count_min: 6
+  quote_count_max: 12
+
+# Style packs (look, font, grade, transitions, music mood, voice) rotate
+# least-recently-used per run. Six ship built in (see DEFAULTS in
+# horrorvibes/config.py): expressionist_oil, grindhouse_poster,
+# vhs_found_footage, woodcut_folk, cosmic_void, polaroid_evidence.
+# Defining `style_packs:` here replaces that list entirely.
 
 logging:
   level: INFO

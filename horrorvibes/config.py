@@ -16,7 +16,17 @@ import yaml
 
 from horrorvibes.exceptions import ConfigError
 
-VALID_IMAGE_BACKENDS = {"local_sd", "openai", "gradient"}
+VALID_IMAGE_BACKENDS = {"mflux", "local_sd", "openai", "gradient"}
+VALID_LAYOUTS = {"upper", "center", "lower"}
+VALID_OVERLAYS = {"none", "grain", "vhs"}
+VALID_CAPTION_MODES = {"karaoke", "static"}
+# Subset of ffmpeg xfade transitions that read well on a portrait short.
+VALID_TRANSITIONS = {
+    "fade", "fadeblack", "fadewhite", "dissolve", "pixelize", "hblur", "radial",
+    "circleopen", "circleclose", "wipeleft", "wiperight", "wipeup", "wipedown",
+    "slideleft", "slideright", "slideup", "slidedown", "smoothup", "smoothdown",
+    "fadegrays", "zoomin", "squeezev",
+}
 VALID_MUSIC_BACKENDS = {"local", "elevenlabs", "curated_file"}
 VALID_PRIVACY_STATUSES = {"private", "unlisted", "public"}
 VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
@@ -44,7 +54,7 @@ DEFAULTS: dict[str, Any] = {
     "quotes": {
         # Responses API model. Reasoning models reject temperature, so it is
         # only sent when set (null = omit). See docs/specs/v3-diversity.md.
-        "model": "gpt-5.5",
+        "model": "gpt-5.6-sol",
         "reasoning_effort": "low",
         "temperature": None,
         "max_attempts": 4,
@@ -83,7 +93,17 @@ DEFAULTS: dict[str, Any] = {
         "movie_cooldown_days": 30,
     },
     "image": {
-        "backend": "local_sd",
+        # Start of the fallback chain mflux -> local_sd -> openai -> gradient.
+        "backend": "mflux",
+        # FLUX.2 Klein through mflux (Apple MLX) -- diffusers' MPS path is
+        # unreliable for FLUX. Generated at a 9:16 size divisible by 16 and
+        # upscaled by the compositor/motion step.
+        "mflux_command": "mflux-generate-flux2",
+        "mflux_model": "flux2-klein-9b",
+        "mflux_steps": 4,
+        "mflux_width": 768,
+        "mflux_height": 1344,
+        "mflux_timeout_sec": 900,
         # Full SDXL base, not sdxl-turbo: turbo's 1-4 step distillation trades
         # away prompt adherence for speed, and images stopped meaningfully
         # relating to their quote/movie as a result. Slower per image, but
@@ -93,7 +113,7 @@ DEFAULTS: dict[str, Any] = {
         "sd_steps": 30,
         "sd_guidance_scale": 7.0,
         "sd_timeout_sec": 300,
-        "openai_model": "gpt-image-1",
+        "openai_model": "gpt-image-2",
         "openai_timeout_sec": 60,
         "style_suffix": (
             "expressionist horror painting, dramatic chiaroscuro lighting, "
@@ -144,7 +164,15 @@ DEFAULTS: dict[str, Any] = {
     "voiceover": {
         "enabled": False,
         "voice_id": "2EiwWnXFnvU5JabPnv8n",  # "Clyde" -- gruff, unsettling; audition and swap freely
-        "model_id": "eleven_multilingual_v2",
+        # eleven_v3 honours per-quote delivery tags like [whispers]; if a v3
+        # request fails, the clip is retried once on fallback_model_id
+        # (untagged) and then on the default voice.
+        "model_id": "eleven_v3",
+        "fallback_model_id": "eleven_multilingual_v2",
+        "use_delivery_tags": True,
+        # Character timings for word-synced captions (/with-timestamps). If
+        # the model returns none, word times are estimated from clip length.
+        "use_timestamps": True,
         "stability": 0.5,
         "similarity_boost": 0.75,
         "style": 0.3,
@@ -163,6 +191,144 @@ DEFAULTS: dict[str, Any] = {
         # one has actually finished.
         "narration_pad_sec": 1.0,
     },
+    "motion": {
+        # Ken Burns zoom/pan per quote, colour grade + film texture from the
+        # style pack, and xfade transitions. Any failure falls back to the
+        # static frame-by-frame assembly, so a run never dies here.
+        "enabled": True,
+        "transition_sec": 0.8,
+        "zoom_amount": 0.10,
+        # Backgrounds are upscaled this much before zoompan to avoid jitter.
+        "upscale_factor": 1.5,
+        # karaoke: words light up as they're narrated. static: whole quote.
+        "caption_mode": "karaoke",
+        "crf": 20,
+        "preset": "medium",
+    },
+    "episodes": {
+        "enabled": True,
+        "history_path": "./episode_history.jsonl",
+        # Chance a run is a themed episode rather than a mixed bag.
+        "themed_share": 0.4,
+        "quote_count_min": 6,
+        "quote_count_max": 12,
+        # {n} = number of quotes. Mixed episodes pick one at random.
+        "mixed_headlines": [
+            "{n} Bone-Chilling Horror Quotes",
+            "{n} Horror Lines That Still Haunt Us",
+            "{n} Quotes Horror Fans Never Forgot",
+            "Whispers From the Dark: {n} Horror Quotes",
+            "{n} Lines You Shouldn't Hear Alone",
+        ],
+        # Each format may narrow the quote briefs (themes / decades /
+        # regions / tv_share) and add an instruction for the model.
+        "formats": [
+            {"name": "folk_horror", "headline": "Folk Horror Night: {n} Quotes",
+             "themes": ["folk horror", "witchcraft", "cult horror"]},
+            {"name": "villains", "headline": "{n} Lines Spoken by Horror Villains",
+             "instruction": "Every line must be spoken by the film's villain, monster or killer."},
+            {"name": "last_words", "headline": "{n} Chilling Last Words in Horror",
+             "instruction": "Prefer final lines, closing narration, or a character's last words."},
+            {"name": "asian_horror", "headline": "{n} Quotes From Asian Horror",
+             "regions": {"Japanese": 1, "South Korean": 1, "Thai": 0.5, "Chinese": 0.5, "Indonesian": 0.5}},
+            {"name": "eighties", "headline": "{n} Quotes From 80s Horror", "decades": [1980]},
+            {"name": "golden_age", "headline": "{n} Quotes From Classic Monster Movies",
+             "decades": [1920, 1930, 1940, 1950, 1960],
+             "themes": ["monster movie", "gothic horror", "vampire", "werewolf", "creature feature"]},
+            {"name": "haunted_tv", "headline": "{n} Quotes From Horror TV", "tv_share": 1.0},
+            {"name": "cosmic", "headline": "{n} Quotes From Beyond: Cosmic & Sci-Fi Horror",
+             "themes": ["cosmic horror", "sci-fi horror", "body horror"]},
+        ],
+    },
+    # Visual + sonic identity, rotated least-recently-used per run. Fonts
+    # missing on the machine fall through to compositor.font_paths.
+    "style_packs": [
+        {
+            "name": "expressionist_oil",
+            "image_style": "expressionist horror oil painting, dramatic chiaroscuro lighting, "
+                           "high-contrast brushwork, bruised muted palette, textured canvas",
+            "font_paths": ["/System/Library/Fonts/Supplemental/Georgia Bold.ttf"],
+            "layout": "center", "text_color": [245, 238, 225], "highlight_color": [255, 255, 255],
+            "scrim_opacity": 120, "stroke_width": 0,
+            "grade": "curves=preset=strong_contrast,eq=saturation=0.8",
+            "overlay": "grain", "vignette": True,
+            "transitions": ["fade", "dissolve", "fadeblack"],
+            "music_mood_anchor": "meditative horror ambient, no vocals, no percussion hits",
+            "music_mood_pool": ["slow", "sparse", "drone", "unsettling calm", "minor key", "distant"],
+            "voice_id": None,
+        },
+        {
+            "name": "grindhouse_poster",
+            "image_style": "1970s grindhouse horror movie poster painting, lurid saturated colours, "
+                           "airbrushed illustration, halftone print texture, dramatic composition",
+            "font_paths": ["/System/Library/Fonts/Supplemental/Impact.ttf"],
+            "layout": "upper", "text_color": [240, 220, 170], "highlight_color": [255, 60, 40],
+            "scrim_opacity": 0, "stroke_width": 4,
+            "grade": "curves=preset=vintage,eq=contrast=1.12:saturation=1.25",
+            "overlay": "grain", "vignette": True,
+            "transitions": ["wipeleft", "slideup", "fadeblack"],
+            "music_mood_anchor": "1970s exploitation horror score, analog synthesizer, no vocals",
+            "music_mood_pool": ["pulsing", "detuned", "menacing", "arpeggiated", "low drone", "tense"],
+            "voice_id": "nPczCjzI2devNBz1zQrb",
+        },
+        {
+            "name": "vhs_found_footage",
+            "image_style": "still frame from degraded 1990s camcorder found footage, night vision, "
+                           "motion blur, harsh on-camera light, grainy low resolution",
+            "font_paths": ["/System/Library/Fonts/Supplemental/Courier New Bold.ttf"],
+            "layout": "lower", "text_color": [210, 210, 210], "highlight_color": [255, 255, 255],
+            "scrim_opacity": 140, "stroke_width": 0,
+            "grade": "eq=saturation=0.55:contrast=1.1,colorbalance=gs=0.06:gm=0.04",
+            "overlay": "vhs", "vignette": False,
+            "transitions": ["pixelize", "hblur", "fadeblack"],
+            "music_mood_anchor": "lo-fi tape hiss horror ambience, warped cassette, no vocals",
+            "music_mood_pool": ["wavering", "detuned", "static", "distant hum", "unsettling", "sparse"],
+            "voice_id": None,
+        },
+        {
+            "name": "woodcut_folk",
+            "image_style": "black and white woodcut print, folk horror, rough carved lines, "
+                           "pagan rural landscape, antique engraving, stark composition",
+            "font_paths": ["/System/Library/Fonts/Supplemental/Luminari.ttf"],
+            "layout": "center", "text_color": [235, 225, 200], "highlight_color": [255, 250, 235],
+            "scrim_opacity": 150, "stroke_width": 0,
+            "grade": "curves=preset=darker,eq=saturation=0.4",
+            "overlay": "grain", "vignette": True,
+            "transitions": ["fade", "circleclose", "dissolve"],
+            "music_mood_anchor": "folk horror drone, droning strings, eerie hum, no vocals",
+            "music_mood_pool": ["ancient", "pastoral dread", "slow", "modal", "hollow", "ritual"],
+            "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+        },
+        {
+            "name": "cosmic_void",
+            "image_style": "cosmic horror digital painting, vast impossible geometry, deep space void, "
+                           "bioluminescent teal and violet light, overwhelming scale",
+            "font_paths": ["/System/Library/Fonts/Avenir Next Condensed.ttc",
+                           "/System/Library/Fonts/Supplemental/Futura.ttc"],
+            "layout": "center", "text_color": [190, 225, 235], "highlight_color": [240, 255, 255],
+            "scrim_opacity": 90, "stroke_width": 0,
+            "grade": "eq=saturation=1.1:contrast=1.05,colorbalance=bs=0.12:ms=0.05",
+            "overlay": "none", "vignette": True,
+            "transitions": ["circleopen", "radial", "fadewhite", "fade"],
+            "music_mood_anchor": "vast cosmic horror drone, deep sub bass, no vocals, no percussion",
+            "music_mood_pool": ["shimmering", "dissonant", "immense", "slow", "alien", "glacial"],
+            "voice_id": None,
+        },
+        {
+            "name": "polaroid_evidence",
+            "image_style": "faded 1970s polaroid photograph, harsh flash, evidence photo, "
+                           "washed-out colours, light leaks, unsettling everyday scene",
+            "font_paths": ["/System/Library/Fonts/Supplemental/AmericanTypewriter.ttc"],
+            "layout": "lower", "text_color": [235, 235, 225], "highlight_color": [255, 255, 255],
+            "scrim_opacity": 160, "stroke_width": 0,
+            "grade": "curves=preset=cross_process,eq=saturation=0.75",
+            "overlay": "grain", "vignette": False,
+            "transitions": ["slideleft", "fadeblack", "wiperight"],
+            "music_mood_anchor": "unsettling minimal horror ambient, music box, no vocals",
+            "music_mood_pool": ["fragile", "slow", "detuned", "sparse", "melancholy", "cold"],
+            "voice_id": "pFZP5JQG7iQjIQuC4Bku",
+        },
+    ],
     "logging": {
         "level": "INFO",
         "file": "./logs/horrorvibes.log",
@@ -237,6 +403,12 @@ class ImageConfig:
     openai_model: str
     openai_timeout_sec: int
     style_suffix: str
+    mflux_command: str = "mflux-generate-flux2"
+    mflux_model: str = "flux2-klein-9b"
+    mflux_steps: int = 4
+    mflux_width: int = 768
+    mflux_height: int = 1344
+    mflux_timeout_sec: int = 900
 
 
 @dataclass(frozen=True)
@@ -284,7 +456,7 @@ class PublishConfig:
 
 
 @dataclass(frozen=True)
-class VoiceoverConfig:
+class VoiceoverConfig:  # pylint: disable=too-many-instance-attributes
     """ElevenLabs text-to-speech narration + music-ducking settings."""
 
     enabled: bool
@@ -301,6 +473,69 @@ class VoiceoverConfig:
     duck_volume: float
     narration_gain: float
     narration_pad_sec: float
+    fallback_model_id: str | None = None
+    use_delivery_tags: bool = True
+    use_timestamps: bool = True
+
+
+@dataclass(frozen=True)
+class StylePack:  # pylint: disable=too-many-instance-attributes
+    """One run's visual and sonic identity."""
+
+    name: str
+    image_style: str
+    font_paths: list[str] = field(default_factory=list)
+    layout: str = "center"
+    text_color: tuple[int, int, int] = (255, 255, 255)
+    highlight_color: tuple[int, int, int] = (255, 255, 255)
+    scrim_opacity: int = 140
+    stroke_width: int = 0
+    grade: str = ""
+    overlay: str = "grain"
+    vignette: bool = True
+    transitions: list[str] = field(default_factory=lambda: ["fade"])
+    music_mood_anchor: str | None = None
+    music_mood_pool: list[str] | None = None
+    voice_id: str | None = None
+
+
+@dataclass(frozen=True)
+class EpisodeFormat:
+    """A themed episode: narrows the quote briefs and names the video."""
+
+    name: str
+    headline: str
+    instruction: str | None = None
+    themes: list[str] | None = None
+    decades: list[int] | None = None
+    regions: dict[str, float] | None = None
+    tv_share: float | None = None
+
+
+@dataclass(frozen=True)
+class EpisodesConfig:
+    """How each run picks its format and length."""
+
+    enabled: bool
+    history_path: Path
+    themed_share: float
+    quote_count_min: int
+    quote_count_max: int
+    mixed_headlines: list[str]
+    formats: list[EpisodeFormat]
+
+
+@dataclass(frozen=True)
+class MotionConfig:
+    """Animated assembly settings (see video.py)."""
+
+    enabled: bool
+    transition_sec: float
+    zoom_amount: float
+    upscale_factor: float
+    caption_mode: str
+    crf: int
+    preset: str
 
 
 @dataclass(frozen=True)
@@ -334,6 +569,9 @@ class Config:
     voiceover: VoiceoverConfig
     logging: LoggingConfig
     automation: AutomationConfig
+    motion: MotionConfig | None = None
+    episodes: EpisodesConfig | None = None
+    style_packs: list[StylePack] = field(default_factory=list)
     raw: dict[str, Any] = field(repr=False, default_factory=dict)
 
 
@@ -354,6 +592,42 @@ def _validate_quotes(quotes_cfg: dict[str, Any]) -> None:
         raise ConfigError("quotes.fuzzy_dup_threshold must be in (0, 1]")
 
 
+def _validate_style_packs(packs: Any) -> None:
+    if not isinstance(packs, list) or not packs:
+        raise ConfigError("style_packs must be a non-empty list")
+    names = [pack.get("name") for pack in packs]
+    if any(not name for name in names) or len(set(names)) != len(names):
+        raise ConfigError("every style pack needs a unique name")
+    for pack in packs:
+        if not pack.get("image_style"):
+            raise ConfigError(f"style pack {pack['name']!r} needs an image_style")
+        if pack.get("layout", "center") not in VALID_LAYOUTS:
+            raise ConfigError(f"style pack {pack['name']!r}: layout must be one of {sorted(VALID_LAYOUTS)}")
+        if pack.get("overlay", "grain") not in VALID_OVERLAYS:
+            raise ConfigError(f"style pack {pack['name']!r}: overlay must be one of {sorted(VALID_OVERLAYS)}")
+        bad = [t for t in pack.get("transitions", ["fade"]) if t not in VALID_TRANSITIONS]
+        if bad or not pack.get("transitions", ["fade"]):
+            raise ConfigError(f"style pack {pack['name']!r}: unsupported transitions {bad}")
+
+
+def _validate_motion_and_episodes(motion: dict[str, Any], episodes: dict[str, Any]) -> None:
+    if motion["caption_mode"] not in VALID_CAPTION_MODES:
+        raise ConfigError(f"motion.caption_mode must be one of {sorted(VALID_CAPTION_MODES)}")
+    if not 0 <= float(motion["transition_sec"]) < 3:
+        raise ConfigError("motion.transition_sec must be in [0, 3)")
+    if not 0 <= float(motion["zoom_amount"]) <= 0.5:
+        raise ConfigError("motion.zoom_amount must be in [0, 0.5]")
+    if not 1 <= int(episodes["quote_count_min"]) <= int(episodes["quote_count_max"]):
+        raise ConfigError("episodes.quote_count_min must be >= 1 and <= quote_count_max")
+    if not 0.0 <= float(episodes["themed_share"]) <= 1.0:
+        raise ConfigError("episodes.themed_share must be between 0 and 1")
+    if not episodes["mixed_headlines"]:
+        raise ConfigError("episodes.mixed_headlines must not be empty")
+    for fmt in episodes["formats"]:
+        if not fmt.get("name") or not fmt.get("headline"):
+            raise ConfigError("every episode format needs a name and a headline")
+
+
 def _validate(data: dict[str, Any]) -> None:
     run = data["run"]
     if int(run["quote_count"]) <= 0:
@@ -362,6 +636,8 @@ def _validate(data: dict[str, Any]) -> None:
         raise ConfigError("run.duration_per_quote_sec must be a positive integer")
 
     _validate_quotes(data["quotes"])
+    _validate_style_packs(data["style_packs"])
+    _validate_motion_and_episodes(data["motion"], data["episodes"])
 
     image_backend = data["image"]["backend"]
     if image_backend not in VALID_IMAGE_BACKENDS:
@@ -389,6 +665,64 @@ def _validate(data: dict[str, Any]) -> None:
     log_level = data["logging"]["level"].upper()
     if log_level not in VALID_LOG_LEVELS:
         raise ConfigError(f"logging.level must be one of {sorted(VALID_LOG_LEVELS)}, got {log_level!r}")
+
+
+def _build_motion(data: dict[str, Any]) -> MotionConfig:
+    return MotionConfig(
+        enabled=bool(data["enabled"]),
+        transition_sec=float(data["transition_sec"]),
+        zoom_amount=float(data["zoom_amount"]),
+        upscale_factor=float(data["upscale_factor"]),
+        caption_mode=str(data["caption_mode"]),
+        crf=int(data["crf"]),
+        preset=str(data["preset"]),
+    )
+
+
+def _build_episodes(data: dict[str, Any]) -> EpisodesConfig:
+    formats = [
+        EpisodeFormat(
+            name=str(fmt["name"]),
+            headline=str(fmt["headline"]),
+            instruction=fmt.get("instruction"),
+            themes=list(fmt["themes"]) if fmt.get("themes") else None,
+            decades=[int(d) for d in fmt["decades"]] if fmt.get("decades") else None,
+            regions={str(k): float(v) for k, v in fmt["regions"].items()} if fmt.get("regions") else None,
+            tv_share=float(fmt["tv_share"]) if fmt.get("tv_share") is not None else None,
+        )
+        for fmt in data["formats"]
+    ]
+    return EpisodesConfig(
+        enabled=bool(data["enabled"]),
+        history_path=Path(data["history_path"]),
+        themed_share=float(data["themed_share"]),
+        quote_count_min=int(data["quote_count_min"]),
+        quote_count_max=int(data["quote_count_max"]),
+        mixed_headlines=list(data["mixed_headlines"]),
+        formats=formats,
+    )
+
+
+def _build_style_pack(data: dict[str, Any]) -> StylePack:
+    return StylePack(
+        name=str(data["name"]),
+        image_style=str(data["image_style"]),
+        font_paths=list(data.get("font_paths") or []),
+        layout=str(data.get("layout", "center")),
+        text_color=tuple(int(c) for c in data.get("text_color", (255, 255, 255))),  # type: ignore[arg-type]
+        highlight_color=tuple(  # type: ignore[arg-type]
+            int(c) for c in data.get("highlight_color", data.get("text_color", (255, 255, 255)))
+        ),
+        scrim_opacity=int(data.get("scrim_opacity", 140)),
+        stroke_width=int(data.get("stroke_width", 0)),
+        grade=str(data.get("grade") or ""),
+        overlay=str(data.get("overlay", "grain")),
+        vignette=bool(data.get("vignette", True)),
+        transitions=list(data.get("transitions") or ["fade"]),
+        music_mood_anchor=data.get("music_mood_anchor"),
+        music_mood_pool=list(data["music_mood_pool"]) if data.get("music_mood_pool") else None,
+        voice_id=data.get("voice_id"),
+    )
 
 
 def load_config(path: str | Path) -> Config:
@@ -460,6 +794,12 @@ def load_config(path: str | Path) -> Config:
             openai_model=merged["image"]["openai_model"],
             openai_timeout_sec=int(merged["image"]["openai_timeout_sec"]),
             style_suffix=merged["image"]["style_suffix"],
+            mflux_command=merged["image"]["mflux_command"],
+            mflux_model=merged["image"]["mflux_model"],
+            mflux_steps=int(merged["image"]["mflux_steps"]),
+            mflux_width=int(merged["image"]["mflux_width"]),
+            mflux_height=int(merged["image"]["mflux_height"]),
+            mflux_timeout_sec=int(merged["image"]["mflux_timeout_sec"]),
         ),
         music=MusicConfig(
             backend=merged["music"]["backend"],
@@ -508,6 +848,9 @@ def load_config(path: str | Path) -> Config:
             duck_volume=float(merged["voiceover"]["duck_volume"]),
             narration_gain=float(merged["voiceover"]["narration_gain"]),
             narration_pad_sec=float(merged["voiceover"]["narration_pad_sec"]),
+            fallback_model_id=merged["voiceover"]["fallback_model_id"] or None,
+            use_delivery_tags=bool(merged["voiceover"]["use_delivery_tags"]),
+            use_timestamps=bool(merged["voiceover"]["use_timestamps"]),
         ),
         logging=LoggingConfig(
             level=merged["logging"]["level"].upper(),
@@ -519,5 +862,8 @@ def load_config(path: str | Path) -> Config:
             min_hours_between_runs=int(merged["automation"]["min_hours_between_runs"]),
             state_file=Path(merged["automation"]["state_file"]),
         ),
+        motion=_build_motion(merged["motion"]),
+        episodes=_build_episodes(merged["episodes"]),
+        style_packs=[_build_style_pack(pack) for pack in merged["style_packs"]],
         raw=merged,
     )

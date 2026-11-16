@@ -1,4 +1,4 @@
-"""AI-generated background images, with a local-SD -> OpenAI -> gradient chain.
+"""AI-generated background images: mflux (FLUX.2) -> local SD -> OpenAI -> gradient.
 
 Backend chain is deliberately injectable (see ``generate_image``'s
 ``backends`` parameter) so unit tests can assert fallback ordering and
@@ -11,6 +11,8 @@ from __future__ import annotations
 import base64
 import logging
 import random
+import shutil
+import subprocess  # nosec B404 - no shell=True anywhere below
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
@@ -26,6 +28,7 @@ logger = logging.getLogger(__name__)
 BackendFn = Callable[[str, int, Path], None]
 
 _BACKEND_CHAIN: dict[str, tuple[str, ...]] = {
+    "mflux": ("mflux", "local_sd", "openai", "gradient"),
     "local_sd": ("local_sd", "openai", "gradient"),
     "openai": ("openai", "gradient"),
     "gradient": ("gradient",),
@@ -53,10 +56,17 @@ class ImageResult:
 
 
 def build_sd_prompt(quote_text: str, movie_title: str, style_suffix: str) -> str:
-    """Build the diffusion prompt. Never renders the quote as literal text --
-    SD is unreliable at in-image typography, so this only conveys mood; the
-    words themselves are composited separately (see compositor.py)."""
+    """Fallback prompt when no scene description is available. Never renders
+    the quote as literal text -- the words are composited separately."""
     return f'Visual mood inspired by the horror film "{movie_title}": {quote_text}. {style_suffix}'
+
+
+def build_scene_prompt(visual_scene: str, style: str) -> str:
+    """Prompt from the quote model's original scene description plus the
+    style pack's look. Portrait framing and no lettering are stated
+    explicitly, since text is composited separately."""
+    scene = visual_scene.strip().rstrip(".")
+    return f"{scene}. {style}. Vertical portrait composition, no text, no lettering."
 
 
 class ImageBackend(Protocol):
@@ -103,6 +113,43 @@ class LocalSDBackend:
             height=self._height,
         )
         result.images[0].save(output_path)
+
+
+class MfluxBackend:
+    """FLUX.2 Klein through mflux (Apple MLX), invoked as a CLI so the heavy
+    MLX stack stays out of this process and a hung generation can be timed
+    out. Fails fast (and the chain falls through) if mflux isn't installed."""
+
+    def __init__(
+        self, config: ImageConfig, runner=subprocess.run, rng: random.Random | None = None
+    ) -> None:
+        self._config = config
+        self._runner = runner
+        self._rng = rng or random.Random()  # nosec B311 - image seed variety, not security-sensitive
+
+    def build_cmd(self, prompt: str, seed: int, output_path: Path) -> list[str]:
+        """argv for one generation -- pure, for testing."""
+        return [
+            self._config.mflux_command,
+            "--model", self._config.mflux_model,
+            "--prompt", prompt,
+            "--steps", str(self._config.mflux_steps),
+            "--seed", str(seed),
+            "--width", str(self._config.mflux_width),
+            "--height", str(self._config.mflux_height),
+            "--output", str(output_path),
+        ]
+
+    def __call__(self, prompt: str, index: int, output_path: Path) -> None:
+        if shutil.which(self._config.mflux_command) is None:
+            raise ImageGenerationError(f"{self._config.mflux_command} not found on PATH (pip install mflux)")
+        cmd = self.build_cmd(prompt, self._rng.randint(0, 2**31 - 1), output_path)
+        # nosec B603 - argv list, no shell; prompt is passed as a single argument
+        result = self._runner(  # nosec B603
+            cmd, capture_output=True, text=True, check=False, timeout=self._config.mflux_timeout_sec
+        )
+        if result.returncode != 0 or not output_path.exists():
+            raise ImageGenerationError(f"mflux failed ({result.returncode}): {result.stderr[-500:]}")
 
 
 class OpenAIImageBackend:
@@ -184,6 +231,7 @@ class GradientBackend:
 def default_backends(config: Config) -> dict[str, ImageBackend]:
     """Build the real, config-driven backend instances for each chain link."""
     return {
+        "mflux": MfluxBackend(config.image),
         "local_sd": LocalSDBackend(config.image, config.run.width, config.run.height),
         "openai": OpenAIImageBackend(config.image, config.run.width, config.run.height),
         "gradient": GradientBackend(config.run.width, config.run.height),
@@ -196,6 +244,8 @@ def generate_image(
     config: Config,
     images_dir: Path,
     backends: dict[str, ImageBackend] | None = None,
+    visual_scene: str | None = None,
+    style: str | None = None,
 ) -> ImageResult:
     """Generate one background image for ``quote``, walking the fallback chain
     rooted at ``config.image.backend``. Always returns a result -- the
@@ -204,12 +254,17 @@ def generate_image(
     backends = backends if backends is not None else default_backends(config)
     chain = _BACKEND_CHAIN[config.image.backend]
 
-    quote_text, movie_title = split_quote_and_title(quote)
-    prompt = build_sd_prompt(quote_text, movie_title, config.image.style_suffix)
+    style = style or config.image.style_suffix
+    if visual_scene:
+        prompt = build_scene_prompt(visual_scene, style)
+    else:
+        quote_text, movie_title = split_quote_and_title(quote)
+        prompt = build_sd_prompt(quote_text, movie_title, style)
 
     images_dir.mkdir(parents=True, exist_ok=True)
     output_path = images_dir / f"background_{index + 1}.png"
 
+    output_path.unlink(missing_ok=True)  # never mistake last run's image for this one's
     for name in chain:
         try:
             backends[name](prompt, index, output_path)
