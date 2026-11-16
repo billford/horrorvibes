@@ -229,7 +229,10 @@ def generate_narrations(  # pylint: disable=too-many-arguments,too-many-locals
                 logger.debug("Alignment word count mismatch for quote %d; will estimate", i + 1)
                 starts = None
             result = Narration(path=output_path, word_starts=starts)
-            logger.info("Narration generated for quote %d via %s", i + 1, model_id)
+            logger.info(
+                "Narration generated for quote %d via %s (word timings: %s)",
+                i + 1, model_id, "yes" if starts is not None else "no -- will estimate",
+            )
             break
         if result is None:
             logger.warning("Narration failed for quote %d on every model/voice, skipping", i + 1)

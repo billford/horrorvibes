@@ -12,6 +12,7 @@ import base64
 import logging
 import random
 import shutil
+import sys
 import subprocess  # nosec B404 - no shell=True anywhere below
 from dataclasses import dataclass
 from pathlib import Path
@@ -143,10 +144,26 @@ class MfluxBackend:
             "--output", str(output_path),
         ]
 
+    def resolve_command(self) -> str | None:
+        """The mflux executable: on PATH, else next to the running Python.
+        ``pip install mflux`` puts it in the venv's bin/, which isn't on
+        PATH when the venv isn't activated (launchd, or calling
+        .venv/bin/python directly)."""
+        found = shutil.which(self._config.mflux_command)
+        if found:
+            return found
+        beside_python = Path(sys.executable).parent / self._config.mflux_command
+        return str(beside_python) if beside_python.is_file() else None
+
     def __call__(self, prompt: str, index: int, output_path: Path) -> None:
-        if shutil.which(self._config.mflux_command) is None:
-            raise ImageGenerationError(f"{self._config.mflux_command} not found on PATH (pip install mflux)")
+        command = self.resolve_command()
+        if command is None:
+            raise ImageGenerationError(
+                f"{self._config.mflux_command} not found on PATH or beside {sys.executable} "
+                "(pip install mflux)"
+            )
         cmd = self.build_cmd(prompt, self._rng.randint(0, 2**31 - 1), output_path)
+        cmd[0] = command
         # nosec B603 - argv list, no shell; prompt is passed as a single argument
         result = self._runner(  # nosec B603
             cmd, capture_output=True, text=True, check=False, timeout=self._config.mflux_timeout_sec

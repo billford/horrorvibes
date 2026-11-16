@@ -8,6 +8,7 @@ non-pytest smoke test of actual local SD inference).
 
 # pylint: disable=missing-function-docstring,missing-class-docstring,redefined-outer-name,unused-argument,unnecessary-lambda,import-outside-toplevel,use-implicit-booleaness-not-comparison
 import dataclasses
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -233,3 +234,22 @@ def test_mflux_failure_raises_so_chain_falls_through(tmp_path, monkeypatch):
 
     with pytest.raises(ImageGenerationError, match="oom"):
         MfluxBackend(config, runner=runner)("p", 0, tmp_path / "o.png")
+
+
+def test_mflux_found_beside_python_when_not_on_path(tmp_path, monkeypatch):
+    config = load_config(tmp_path / "missing.yaml").image
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / config.mflux_command).write_text("#!/bin/sh\n")
+    monkeypatch.setattr("horrorvibes.imagegen.shutil.which", lambda name: None)
+    monkeypatch.setattr("horrorvibes.imagegen.sys.executable", str(fake_bin / "python"))
+    calls = []
+
+    def runner(cmd, **kwargs):
+        calls.append(cmd)
+        Path(cmd[cmd.index("--output") + 1]).write_bytes(b"png")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    MfluxBackend(config, runner=runner)("p", 0, tmp_path / "o.png")
+
+    assert calls[0][0] == str(fake_bin / config.mflux_command)
