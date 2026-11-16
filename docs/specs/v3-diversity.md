@@ -1,7 +1,7 @@
 # v3: more diverse videos, better and less repetitive quotes
 
-Status: draft (2026-11-16). Phase 1 implemented on branch `v3-diversity`; phases 2-3 need decisions (see
-**Open questions**).
+Status: approved 2026-11-16. Phases 1 and 2 are implemented on branch `v3-diversity`; phase 3 is not
+started. Decisions: pin `gpt-5.6-sol`, build all six phase-2 items, ship style packs.
 
 ## Why the output repeats today
 
@@ -53,10 +53,10 @@ checks every candidate and returns a verdict per item. Items judged inaccurate o
 corrected year is applied. If the verify call itself errors, candidates are kept and a warning is logged, so an
 unattended run never fails on verification.
 
-**Model.** `quotes.model` defaults to `gpt-5.5` and is configurable. `quotes.reasoning_effort` defaults to
+**Model.** `quotes.model` defaults to `gpt-5.6-sol` (the GPT-5.6 flagship) and is configurable. `quotes.reasoning_effort` defaults to
 `low`. `temperature` is now optional and is only sent when set, because reasoning models reject it.
 
-## Phase 2: video diversity (proposed, not built)
+## Phase 2: video diversity (implemented)
 
 Ordered by impact per unit of effort and cost.
 
@@ -98,9 +98,23 @@ performance.
 - Every external call stays injectable and mocked in tests.
 - An unattended run must degrade, never hang or fail on a non-essential step.
 
-## Open questions
+## Implementation notes (phase 2)
 
-1. Phase 2 scope: build all of items 1-3 now (no new spend), or start with style packs only?
-2. Is ~12 web-search verification calls per run acceptable spend? It is on by default in this branch.
-3. Should an image-model bake-off (SDXL vs FLUX via mflux) run on lola? It needs console or SSH access there.
-4. Confirm `gpt-5.5` is the model to pin. The OpenAI changelog also lists a newer `gpt-5.6-*` family.
+- `episode.py` plans each run. Style packs and themed formats rotate least-recently-used from
+  `episode_history.jsonl`, and the quote count is drawn from 6-12.
+- Quotes gain `visual_scene` and `delivery` fields, which drive the image prompts and the v3 audio tags.
+- The image chain is `mflux` (FLUX.2 Klein CLI) -> SDXL -> `gpt-image-2` -> gradient.
+- Narration uses `eleven_v3` through `/with-timestamps`. On failure it falls back to
+  `eleven_multilingual_v2` untagged, then to the default voice.
+- Captions are PIL layer images switched by an ffmpeg `overlay` `enable` window. Homebrew ffmpeg has no
+  `libass`, so subtitle filters are not an option.
+- Motion clips are rendered in parallel and joined with `xfade`. Each non-final clip is extended by the
+  transition length so that every transition starts at the next quote's offset, keeping the total equal to
+  the sum of the quote durations. Any failure falls back to static assembly.
+
+## Still open
+
+1. Image bake-off on lola: FLUX.2 Klein (mflux) vs SDXL. `mflux` must be installed there.
+2. Audition the pack voices (Brian, George and Lily are premade voices) and confirm v3 returns character
+   timings.
+3. Phase 3: weight packs and formats by YouTube retention.
