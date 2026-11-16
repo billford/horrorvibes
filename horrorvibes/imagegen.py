@@ -69,7 +69,7 @@ def build_scene_prompt(visual_scene: str, style: str) -> str:
     scene = visual_scene.strip().rstrip(".")
     return (
         f"{scene}. {style}. Vertical portrait composition, full-bleed edge to edge, "
-        "no border or frame, no text, no lettering."
+        "no border or frame, no text, lettering, signature or watermark."
     )
 
 
