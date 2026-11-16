@@ -114,7 +114,8 @@ performance.
 
 ## Still open
 
-1. Image bake-off on lola: FLUX.2 Klein (mflux) vs SDXL. `mflux` must be installed there.
+1. ~~Image bake-off on lola.~~ Done 2026-11-16. FLUX.2 Klein 4B took ~19 s per image against ~88 s for
+   SDXL, with much better prompt adherence. 9B is gated (non-commercial), so the default is 4B.
 2. Audition the pack voices (Brian, George and Lily are premade voices) and confirm v3 returns character
    timings.
 3. Phase 3: weight packs and formats by YouTube retention.
