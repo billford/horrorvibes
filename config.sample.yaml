@@ -238,5 +238,7 @@ logging:
   backup_count: 3
 
 automation:
-  min_hours_between_runs: 36
+  # launchd fires daily at 09:00. 12h still stops a double run on the same day,
+  # while letting a manual afternoon run be followed by the next morning's run.
+  min_hours_between_runs: 12
   state_file: ./logs/last_run.json

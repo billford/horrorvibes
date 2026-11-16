@@ -23,7 +23,7 @@ but is superseded by the `horrorvibes/` package described below.
   `sys.exit()`, real logging instead of `print()`, and a full pytest suite. `pylint` and `bandit` both run
   clean (see `pyproject.toml`).
 - **Automation**: designed to run unattended via `launchd` on a Mac (see `com.billford.horrorvibes.plist`),
-  every other day, including the YouTube upload step -- with a macOS notification if a run fails.
+  once a day, including the YouTube upload step -- with a macOS notification if a run fails.
 
 ## Architecture
 
@@ -71,7 +71,7 @@ python3 run.py                # full pipeline, uploads to YouTube if publish.you
 - `--config PATH`: use a config file other than `./config.yaml`
 - `--quotes N`: override `run.quote_count` for this invocation
 - `--dry-run`: run the full pipeline but never upload to YouTube
-- `--force`: ignore the every-other-day cadence guard and run now
+- `--force`: ignore the cadence guard and run now
 
 Everything else (image/music backends, prompts, fonts, privacy status, logging, cadence) lives in
 `config.yaml` -- see `config.sample.yaml` for the full annotated list of settings.
@@ -194,7 +194,7 @@ texture, which is the only kind of output this prompt asks for.
 [ElevenLabs Music API](https://elevenlabs.io/docs/api-reference/music) once per run, sized to the whole
 video's duration. **Costs real money, not a repurposed existing subscription**: as of this writing, priced at
 **$0.15/minute** (~900 credits/minute on subscription plans). At 12 quotes x 10s = 120s (2 minutes) per video,
-and roughly 15 runs/month on an every-other-day cadence, that's about **$4.50/month**, or ~27,000 credits/month
+and roughly 30 runs/month on a daily cadence, that's about **$9/month**, or ~54,000 credits/month
 -- confirm current pricing at https://elevenlabs.io/pricing/api before enabling this. You'll need a separate
 `ELEVENLABS_API_KEY`, and note that ElevenLabs lets you cap an individual key's own credit quota separately
 from your account's overall balance (a useful blast-radius limit, but easy to forget you set it to 0 on a
@@ -301,9 +301,10 @@ corrupt it.
 
 ## Automation on your Mac (launchd)
 
-`com.billford.horrorvibes.plist` is a `launchd` user agent template. **launchd has no native "every N days"
-schedule** -- it fires once a day, and `horrorvibes.orchestrator.is_run_due()` decides whether to actually do
-anything, based on `automation.min_hours_between_runs` (default 36h) and the last recorded run in
+`com.billford.horrorvibes.plist` is a `launchd` user agent template. It fires once a day, and
+`horrorvibes.orchestrator.is_run_due()` decides whether to actually do anything, based on
+`automation.min_hours_between_runs` (default 12h, which allows one run per day; set it to 36 for every
+other day) and the last recorded run in
 `automation.state_file`. This is why `logs/last_run.json` exists.
 
 Before installing:

@@ -187,9 +187,9 @@ compositor:
 
 publish:
   youtube_upload: true
-  # private | unlisted | public -- start private until you've watched a few
-  # unattended runs' worth of output, then flip this once you trust the pipeline.
-  privacy_status: private
+  # private | unlisted | public. Public since 2026-11-16, once the v3 output was
+  # trusted, so daily runs don't wait on a manual publish.
+  privacy_status: public
   category_id: "17"
   client_secrets_path: ./client_secret.json
   token_path: ./token.json
@@ -237,5 +237,7 @@ logging:
   backup_count: 3
 
 automation:
-  min_hours_between_runs: 36
+  # launchd fires daily at 09:00. 12h still stops a double run on the same day,
+  # while letting a manual afternoon run be followed by the next morning's run.
+  min_hours_between_runs: 12
   state_file: ./logs/last_run.json

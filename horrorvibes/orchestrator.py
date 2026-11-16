@@ -41,7 +41,7 @@ def is_run_due(
     automation_config: AutomationConfig,
     now: Callable[[], datetime] | None = None,
 ) -> bool:
-    """Every-other-day guard: launchd fires daily, this decides whether to
+    """Cadence guard: launchd fires daily, this decides whether to
     actually do anything. True if no prior run is recorded, or the last
     recorded run is older than min_hours_between_runs."""
     now = now or datetime.now

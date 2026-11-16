@@ -107,7 +107,7 @@ DEFAULTS: dict[str, Any] = {
         # Full SDXL base, not sdxl-turbo: turbo's 1-4 step distillation trades
         # away prompt adherence for speed, and images stopped meaningfully
         # relating to their quote/movie as a result. Slower per image, but
-        # cadence is every-other-day, so there's no real-time pressure.
+        # runs are once a day, so there's no real-time pressure.
         "sd_model": "stabilityai/stable-diffusion-xl-base-1.0",
         "sd_device": "mps",
         "sd_steps": 30,
@@ -349,7 +349,7 @@ DEFAULTS: dict[str, Any] = {
         "backup_count": 3,
     },
     "automation": {
-        "min_hours_between_runs": 36,
+        "min_hours_between_runs": 12,
         "state_file": "./logs/last_run.json",
     },
 }
