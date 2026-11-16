@@ -190,6 +190,9 @@ def test_build_ducked_mix_cmd_single_entry_uses_explicit_start_offset(tmp_path, 
     assert f"volume={voiceover_config.duck_volume}" in filter_complex
     assert f"volume={voiceover_config.narration_gain}" in filter_complex
     assert "sidechaincompress" not in filter_complex
+    # both sides are levelled first, so a whispered take can't be buried
+    assert f"[0:a]loudnorm=I={voiceover_config.music_lufs}" in filter_complex
+    assert f"[1:a]loudnorm=I={voiceover_config.narration_lufs}" in filter_complex
     assert "-map" in cmd and cmd[cmd.index("-map") + 1] == "[final]"
 
 

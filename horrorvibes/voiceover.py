@@ -280,11 +280,15 @@ def build_ducked_mix_cmd(  # pylint: disable=too-many-locals
         duck_windows.append((start_sec, start_sec + duration_sec))
 
     duck_condition = "+".join(f"between(t,{start},{end})" for start, end in duck_windows)
+    # loudnorm upsamples to 192 kHz internally, so resample straight back.
+    music_norm = f"loudnorm=I={voiceover_config.music_lufs}:TP=-2:LRA=11,aresample=44100"
+    voice_norm = f"loudnorm=I={voiceover_config.narration_lufs}:TP=-1.5:LRA=11,aresample=44100"
     filter_parts = [
-        f"[0:a]volume={voiceover_config.duck_volume}:enable='{duck_condition}':eval=frame[duckedmusic]"
+        f"[0:a]{music_norm},"
+        f"volume={voiceover_config.duck_volume}:enable='{duck_condition}':eval=frame[duckedmusic]"
     ]
     filter_parts += [
-        f"[{position}:a]volume={voiceover_config.narration_gain}[g{position}]"
+        f"[{position}:a]{voice_norm},volume={voiceover_config.narration_gain}[g{position}]"
         for position, _, _ in delay_labels
     ]
     filter_parts += [

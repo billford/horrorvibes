@@ -187,7 +187,12 @@ DEFAULTS: dict[str, Any] = {
         # narration's own gain boost -- see voiceover.py for why this replaced
         # a sidechaincompress-based approach.
         "duck_volume": 0.3,
-        "narration_gain": 1.6,
+        "narration_gain": 1.0,
+        # Every narration clip is levelled to narration_lufs and the music bed
+        # to music_lufs before ducking, so a whispered line is as audible as a
+        # shouted one and a loud music render can't bury the voice.
+        "narration_lufs": -16.0,
+        "music_lufs": -27.0,
         # Extra seconds a quote stays on screen past its narration's own
         # length, so the next quote's narration never starts before this
         # one has actually finished.
@@ -483,6 +488,8 @@ class VoiceoverConfig:  # pylint: disable=too-many-instance-attributes
     narration_gain: float
     narration_pad_sec: float
     fallback_model_id: str | None = None
+    narration_lufs: float = -16.0
+    music_lufs: float = -27.0
     use_delivery_tags: bool = True
     use_timestamps: bool = True
 
@@ -870,6 +877,8 @@ def load_config(path: str | Path) -> Config:
             duck_volume=float(merged["voiceover"]["duck_volume"]),
             narration_gain=float(merged["voiceover"]["narration_gain"]),
             narration_pad_sec=float(merged["voiceover"]["narration_pad_sec"]),
+            narration_lufs=float(merged["voiceover"]["narration_lufs"]),
+            music_lufs=float(merged["voiceover"]["music_lufs"]),
             fallback_model_id=merged["voiceover"]["fallback_model_id"] or None,
             use_delivery_tags=bool(merged["voiceover"]["use_delivery_tags"]),
             use_timestamps=bool(merged["voiceover"]["use_timestamps"]),

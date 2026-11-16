@@ -164,10 +164,14 @@ voiceover:
   api_timeout_sec: 60
   max_retries: 3
   retry_backoff_sec: 5
-  # Music volume during each narration's exact window (linear, 0-1), and a
-  # gain boost applied to narration so it isn't buried under the music bed.
+  # Every narration clip is levelled to narration_lufs and the music bed to
+  # music_lufs, so whispered lines are as audible as shouted ones. Then the
+  # music drops to duck_volume (linear, 0-1) under each narration, and
+  # narration_gain is an extra multiplier on top of the levelled voice.
   duck_volume: 0.3
-  narration_gain: 1.6
+  narration_gain: 1.0
+  narration_lufs: -16.0
+  music_lufs: -27.0
   # Extra seconds a quote stays on screen past its narration's own length, so
   # the next quote's narration never starts before this one has finished.
   narration_pad_sec: 1.0
