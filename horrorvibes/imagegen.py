@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageStat
 
 from horrorvibes.config import Config, ImageConfig
 from horrorvibes.exceptions import ImageGenerationError
@@ -71,6 +71,62 @@ def build_scene_prompt(visual_scene: str, style: str) -> str:
         f"{scene}. {style}. Vertical portrait composition, full-bleed edge to edge, "
         "no border or frame, no text, lettering, signature or watermark."
     )
+
+
+def _flat_depth(gray: Image.Image, side: str, limit: int, max_std: float) -> tuple[int, float]:
+    """How many rows/columns in from ``side`` are near-uniform, and their mean."""
+    width, height = gray.size
+    depth, means = 0, []
+    for k in range(limit):
+        box = {
+            "top": (0, k, width, k + 1), "bottom": (0, height - 1 - k, width, height - k),
+            "left": (k, 0, k + 1, height), "right": (width - 1 - k, 0, width - k, height),
+        }[side]
+        stat = ImageStat.Stat(gray.crop(box))
+        if stat.stddev[0] > max_std:
+            break
+        depth, means = k + 1, means + [stat.mean[0]]
+    return depth, (sum(means) / len(means) if means else 0.0)
+
+
+def trim_border(  # pylint: disable=too-many-locals
+    path: Path, max_fraction: float = 0.12, max_std: float = 14.0, min_px: int = 4
+) -> bool:
+    """Crop a drawn print/photo border off a generated image, keeping its size
+    and aspect. Only fires when a flat band of similar colour runs round all
+    four edges. Returns whether it
+    trimmed."""
+    with Image.open(path) as opened:
+        img = opened.convert("RGB")
+    width, height = img.size
+    gray = img.convert("L")
+    sides = {
+        side: _flat_depth(gray, side, int((height if side in ("top", "bottom") else width) * max_fraction),
+                          max_std)
+        for side in ("top", "bottom", "left", "right")
+    }
+    depths = [d for d, _ in sides.values()]
+    means = [m for _, m in sides.values()]
+    # Light borders only: horror scenes are often black at every edge, and a
+    # dark frame can't be told apart from a dark night.
+    if min(depths) < min_px or min(means) < 180:
+        return False
+    pad = 2  # the frame's inner edge is often a soft line
+    left, top = sides["left"][0] + pad, sides["top"][0] + pad
+    right, bottom = width - sides["right"][0] - pad, height - sides["bottom"][0] - pad
+    inner_w, inner_h = right - left, bottom - top
+    # centre-crop the inside back to the original aspect before scaling up
+    target = width / height
+    if inner_w / inner_h > target:
+        new_w = int(inner_h * target)
+        left += (inner_w - new_w) // 2
+        right = left + new_w
+    else:
+        new_h = int(inner_w / target)
+        top += (inner_h - new_h) // 2
+        bottom = top + new_h
+    img.crop((left, top, right, bottom)).resize((width, height), Image.Resampling.LANCZOS).save(path)
+    return True
 
 
 class ImageBackend(Protocol):
@@ -294,6 +350,12 @@ def generate_image(
             )
             continue
         logger.info("Image %d generated via %r backend", index + 1, name)
+        if name != "gradient":
+            try:
+                if trim_border(output_path):
+                    logger.info("Trimmed a drawn border off image %d", index + 1)
+            except OSError:
+                logger.warning("Border check failed for image %d", index + 1, exc_info=True)
         return ImageResult(path=output_path, backend_used=name)
 
     raise ImageGenerationError(f"All image backends in chain {chain} failed for quote index {index}")

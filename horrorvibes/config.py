@@ -200,6 +200,12 @@ DEFAULTS: dict[str, Any] = {
         "enabled": True,
         "transition_sec": 0.8,
         "zoom_amount": 0.10,
+        # Keep the image alive under the captions: slow pan (fraction of the
+        # zoom slack), heat-haze ripple (pixels) and candle flicker
+        # (brightness). 0 turns each off.
+        "drift": 0.8,
+        "ripple_px": 3.0,
+        "flicker": 0.025,
         # Backgrounds are upscaled this much before zoompan to avoid jitter.
         "upscale_factor": 1.5,
         # karaoke: words light up as they're narrated. static: whole quote.
@@ -537,6 +543,9 @@ class MotionConfig:
     zoom_amount: float
     upscale_factor: float
     caption_mode: str
+    drift: float
+    ripple_px: float
+    flicker: float
     crf: int
     preset: str
 
@@ -620,6 +629,12 @@ def _validate_motion_and_episodes(motion: dict[str, Any], episodes: dict[str, An
         raise ConfigError("motion.transition_sec must be in [0, 3)")
     if not 0 <= float(motion["zoom_amount"]) <= 0.5:
         raise ConfigError("motion.zoom_amount must be in [0, 0.5]")
+    if not 0 <= float(motion["drift"]) <= 1:
+        raise ConfigError("motion.drift must be in [0, 1]")
+    if not 0 <= float(motion["ripple_px"]) <= 20:
+        raise ConfigError("motion.ripple_px must be in [0, 20]")
+    if not 0 <= float(motion["flicker"]) <= 0.2:
+        raise ConfigError("motion.flicker must be in [0, 0.2]")
     if not 1 <= int(episodes["quote_count_min"]) <= int(episodes["quote_count_max"]):
         raise ConfigError("episodes.quote_count_min must be >= 1 and <= quote_count_max")
     if not 0.0 <= float(episodes["themed_share"]) <= 1.0:
@@ -677,6 +692,9 @@ def _build_motion(data: dict[str, Any]) -> MotionConfig:
         zoom_amount=float(data["zoom_amount"]),
         upscale_factor=float(data["upscale_factor"]),
         caption_mode=str(data["caption_mode"]),
+        drift=float(data["drift"]),
+        ripple_px=float(data["ripple_px"]),
+        flicker=float(data["flicker"]),
         crf=int(data["crf"]),
         preset=str(data["preset"]),
     )

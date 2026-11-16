@@ -131,6 +131,17 @@ def test_rejects_bad_caption_mode_and_count_range(tmp_path):
         load_config(_write_yaml(tmp_path, "episodes:\n  quote_count_min: 9\n  quote_count_max: 4\n"))
 
 
+@pytest.mark.parametrize("key,value", [("drift", 1.5), ("ripple_px", 50), ("flicker", -0.1)])
+def test_rejects_out_of_range_motion_effects(tmp_path, key, value):
+    with pytest.raises(ConfigError, match=key):
+        load_config(_write_yaml(tmp_path, f"motion:\n  {key}: {value}\n"))
+
+
+def test_motion_effects_default_on(tmp_path):
+    motion = load_config(tmp_path / "missing.yaml").motion
+    assert motion.drift > 0 and motion.ripple_px > 0 and motion.flicker > 0
+
+
 def test_style_pack_and_episode_format_parse(tmp_path):
     config = load_config(tmp_path / "missing.yaml")
     pack = config.style_packs[0]

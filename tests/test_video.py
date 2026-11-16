@@ -170,10 +170,31 @@ def test_clip_cmd_feeds_background_once_and_loops_layers(tmp_path):
     assert cmd[bg_index - 1] == "-i" and cmd[bg_index - 2] != "1"
     assert cmd.count("-loop") == 4  # title + 3 caption states
     graph = cmd[cmd.index("-filter_complex") + 1]
-    assert "zoompan=z='1+0.1*on/174'" in graph and "d=174" in graph
+    assert "zoompan=z='1.06+0.1*on/174'" in graph and "d=174" in graph
     assert "eq=saturation=0.5" in graph
     assert "enable='between(t,1.000,1.999)'" in graph
     assert "noise=" in graph and "vignette" in graph
+
+
+def test_clip_filter_pans_ripples_and_flickers_the_background(tmp_path):
+    spec = dataclasses.replace(_clip(tmp_path), drift_x=1.0, drift_y=-0.5)
+    cmd = build_clip_cmd(spec, 5.8, MotionStyle(drift=0.8, ripple_px=3.0, flicker=0.02),
+                         1080, 1920, 30, tmp_path / "c.mp4")
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "x='(iw-iw/zoom)*(0.5+0.800*(on/174-0.5))'" in graph
+    assert "y='(ih-ih/zoom)*(0.5+-0.400*(on/174-0.5))'" in graph
+    assert "nullsrc=s=134x240:r=30:d=5.800" in graph and "[z][mx][my]displace" in graph
+    assert "eq=brightness='0.02*sin(t*6.3)" in graph
+    # effects land on the background, before captions are laid over it
+    assert graph.index("displace") < graph.index("[bg][title]overlay")
+
+
+def test_clip_filter_effects_can_be_turned_off(tmp_path):
+    style = MotionStyle(drift=0, ripple_px=0, flicker=0)
+    graph = build_clip_cmd(_clip(tmp_path), 5, style, 1080, 1920, 30, tmp_path / "c.mp4")
+    graph = graph[graph.index("-filter_complex") + 1]
+    assert "zoompan=z='1+" in graph
+    assert "displace" not in graph and "nullsrc" not in graph and "brightness" not in graph
 
 
 def test_clip_filter_static_caption_fades_in(tmp_path):

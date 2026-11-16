@@ -253,3 +253,41 @@ def test_mflux_found_beside_python_when_not_on_path(tmp_path, monkeypatch):
     MfluxBackend(config, runner=runner)("p", 0, tmp_path / "o.png")
 
     assert calls[0][0] == str(fake_bin / config.mflux_command)
+
+
+def _framed(path, border_colour, inner_colour=(40, 40, 40), size=(200, 300), border=12):
+    img = Image.new("RGB", size, border_colour)
+    inner = Image.effect_noise((size[0] - 2 * border, size[1] - 2 * border), 60).convert("RGB")
+    img.paste(inner, (border, border))
+    img.save(path)
+
+
+def test_trim_border_removes_a_light_print_border_and_keeps_size(tmp_path):
+    from horrorvibes.imagegen import trim_border
+
+    path = tmp_path / "b.png"
+    _framed(path, (255, 255, 255))
+    assert trim_border(path) is True
+    with Image.open(path) as img:
+        assert img.size == (200, 300)
+        assert img.getpixel((0, 0)) != (255, 255, 255)
+
+
+def test_trim_border_leaves_dark_edges_alone(tmp_path):
+    from horrorvibes.imagegen import trim_border
+
+    path = tmp_path / "b.png"
+    _framed(path, (0, 0, 0))  # a night scene that's black at every edge
+    before = path.read_bytes()
+    assert trim_border(path) is False
+    assert path.read_bytes() == before
+
+
+def test_trim_border_needs_all_four_sides(tmp_path):
+    from horrorvibes.imagegen import trim_border
+
+    path = tmp_path / "b.png"
+    img = Image.effect_noise((200, 300), 60).convert("RGB")
+    img.paste((255, 255, 255), (0, 0, 200, 40))  # bright sky along the top only
+    img.save(path)
+    assert trim_border(path) is False

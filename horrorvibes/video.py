@@ -147,6 +147,9 @@ class ClipSpec:
     state_times: list[float]
     duration: float
     zoom_in: bool = True
+    # Pan direction across the clip, each in [-1, 1]; 0 holds the axis centred.
+    drift_x: float = 0.0
+    drift_y: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -158,6 +161,12 @@ class MotionStyle:  # pylint: disable=too-many-instance-attributes
     vignette: bool = True
     zoom_amount: float = 0.10
     upscale_factor: float = 1.5
+    # Fraction of the zoom slack a clip pans across (0 disables drift).
+    drift: float = 0.8
+    # Heat-haze displacement amplitude in output pixels (0 disables it).
+    ripple_px: float = 3.0
+    # Candle-flicker brightness amplitude (0 disables it).
+    flicker: float = 0.025
     transition_sec: float = 0.8
     crf: int = 20
     preset: str = "medium"
@@ -183,15 +192,32 @@ def build_clip_filter(  # pylint: disable=too-many-arguments,too-many-locals
     frames = max(1, round(clip_len * fps))
     up_w, up_h = _even(width * style.upscale_factor), _even(height * style.upscale_factor)
     zoom = style.zoom_amount
-    zexpr = f"1+{zoom}*on/{frames}" if spec.zoom_in else f"1+{zoom}-{zoom}*on/{frames}"
+    # A little base zoom gives the pan room to move from the first frame.
+    base = 1.06 if style.drift > 0 else 1
+    zexpr = f"{base}+{zoom}*on/{frames}" if spec.zoom_in else f"{base}+{zoom}-{zoom}*on/{frames}"
+    pan_x = f"{style.drift * spec.drift_x:.3f}*(on/{frames}-0.5)"
+    pan_y = f"{style.drift * spec.drift_y:.3f}*(on/{frames}-0.5)"
     background = (
         f"[0:v]scale={up_w}:{up_h}:force_original_aspect_ratio=increase,crop={up_w}:{up_h},setsar=1,"
-        f"zoompan=z='{zexpr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+        f"zoompan=z='{zexpr}':x='(iw-iw/zoom)*(0.5+{pan_x})':y='(ih-ih/zoom)*(0.5+{pan_y})'"
         f":d={frames}:s={width}x{height}:fps={fps}"
     )
+    parts = []
+    if style.ripple_px > 0:
+        background += ",format=gbrp[z]"
+        parts += [
+            background,
+            _ripple_map("mx", "sin(2*PI*Y/22+T*1.9)+0.5*sin(2*PI*X/31-T*1.3)", style.ripple_px,
+                        clip_len, width, height, fps),
+            _ripple_map("my", "0.8*sin(2*PI*X/26+T*1.5)", style.ripple_px, clip_len, width, height, fps),
+        ]
+        background = "[z][mx][my]displace=edge=smear"
+    if style.flicker > 0:
+        amp = style.flicker
+        background += f",eq=brightness='{amp}*sin(t*6.3)+{amp * 0.6:.4f}*sin(t*15.1)':eval=frame"
     if style.grade:
         background += f",{style.grade}"
-    parts = [
+    parts += [
         background + "[bg]",
         "[1:v]format=rgba,fade=t=in:st=0.2:d=0.8:alpha=1[title]",
         "[bg][title]overlay=0:0[v0]",
@@ -215,6 +241,19 @@ def build_clip_filter(  # pylint: disable=too-many-arguments,too-many-locals
     finish.append("format=yuv420p")
     parts.append(f"[{current}]{','.join(finish)}[out]")
     return ";".join(parts)
+
+
+def _ripple_map(  # pylint: disable=too-many-arguments
+    label: str, wave: str, amplitude: float, clip_len: float, width: int, height: int, fps: int
+) -> str:
+    """A slowly moving displacement map for ``displace`` (128 = no shift).
+    Computed at 1/8 resolution and scaled up, which keeps geq cheap and the
+    waves smooth."""
+    expr = f"128+{amplitude}*({wave})"
+    return (
+        f"nullsrc=s={_even(width / 8)}x{_even(height / 8)}:r={fps}:d={clip_len:.3f},format=gbrp,"
+        f"geq=r='{expr}':g='{expr}':b='{expr}',scale={width}:{height}[{label}]"
+    )
 
 
 def build_clip_cmd(  # pylint: disable=too-many-arguments

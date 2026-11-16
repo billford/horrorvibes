@@ -199,6 +199,11 @@ motion:
   enabled: true
   transition_sec: 0.8
   zoom_amount: 0.10
+  # Keep the image alive under the captions: slow pan (fraction of the zoom
+  # slack), heat-haze ripple (pixels) and candle flicker (brightness). 0 = off.
+  drift: 0.8
+  ripple_px: 3.0
+  flicker: 0.025
   upscale_factor: 1.5
   caption_mode: karaoke   # karaoke (words light up as narrated) | static
   crf: 20

@@ -307,12 +307,15 @@ def _assemble(  # pylint: disable=too-many-arguments
                 ),
                 duration=quote_durations[i],
                 zoom_in=i % 2 == 0,
+                drift_x=rng.uniform(-1, 1),
+                drift_y=rng.uniform(-0.6, 0.6),
             )
             for i, m in enumerate(media)
         ]
         style = video.MotionStyle(
             grade=plan.pack.grade, overlay=plan.pack.overlay, vignette=plan.pack.vignette,
             zoom_amount=motion.zoom_amount, upscale_factor=motion.upscale_factor,
+            drift=motion.drift, ripple_px=motion.ripple_px, flicker=motion.flicker,
             transition_sec=motion.transition_sec, crf=motion.crf, preset=motion.preset,
         )
         transitions = [rng.choice(plan.pack.transitions) for _ in range(max(len(clips) - 1, 0))]
