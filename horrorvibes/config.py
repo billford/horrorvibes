@@ -337,14 +337,7 @@ class Config:
     raw: dict[str, Any] = field(repr=False, default_factory=dict)
 
 
-def _validate(data: dict[str, Any]) -> None:
-    run = data["run"]
-    if int(run["quote_count"]) <= 0:
-        raise ConfigError("run.quote_count must be a positive integer")
-    if int(run["duration_per_quote_sec"]) <= 0:
-        raise ConfigError("run.duration_per_quote_sec must be a positive integer")
-
-    quotes_cfg = data["quotes"]
+def _validate_quotes(quotes_cfg: dict[str, Any]) -> None:
     if not quotes_cfg["themes"]:
         raise ConfigError("quotes.themes must list at least one subgenre")
     if not quotes_cfg["decades"]:
@@ -359,6 +352,16 @@ def _validate(data: dict[str, Any]) -> None:
         raise ConfigError("quotes.tv_share must be between 0 and 1")
     if not 0.0 < float(quotes_cfg["fuzzy_dup_threshold"]) <= 1.0:
         raise ConfigError("quotes.fuzzy_dup_threshold must be in (0, 1]")
+
+
+def _validate(data: dict[str, Any]) -> None:
+    run = data["run"]
+    if int(run["quote_count"]) <= 0:
+        raise ConfigError("run.quote_count must be a positive integer")
+    if int(run["duration_per_quote_sec"]) <= 0:
+        raise ConfigError("run.duration_per_quote_sec must be a positive integer")
+
+    _validate_quotes(data["quotes"])
 
     image_backend = data["image"]["backend"]
     if image_backend not in VALID_IMAGE_BACKENDS:
