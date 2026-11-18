@@ -198,3 +198,30 @@ def test_publish_wires_credentials_service_and_upload_together(tmp_path):
     )
 
     assert video_id == "xyz"
+
+
+def test_get_unattended_credentials_keeps_the_tokens_own_scopes(tmp_path):
+    token_path = tmp_path / "token.json"
+    granted = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/yt-analytics.readonly"]
+    token_path.write_text('{"token": "x", "scopes": %s}' % str(granted).replace("'", '"'))
+    seen = {}
+
+    def factory(data, scopes):
+        seen["scopes"] = scopes
+        return FakeCreds(valid=True)
+
+    get_unattended_credentials(token_path, credentials_factory=factory, request_factory=lambda: object())
+    assert seen["scopes"] == granted
+
+
+def test_get_unattended_credentials_falls_back_to_upload_scope(tmp_path):
+    token_path = tmp_path / "token.json"
+    token_path.write_text('{"token": "x"}')
+    seen = {}
+
+    def factory(data, scopes):
+        seen["scopes"] = scopes
+        return FakeCreds(valid=True)
+
+    get_unattended_credentials(token_path, credentials_factory=factory, request_factory=lambda: object())
+    assert seen["scopes"] == ["https://www.googleapis.com/auth/youtube.upload"]

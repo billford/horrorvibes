@@ -28,6 +28,11 @@ from horrorvibes.exceptions import PublishError
 logger = logging.getLogger(__name__)
 
 YOUTUBE_UPLOAD_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+YOUTUBE_READONLY_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
+YOUTUBE_ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"
+# Everything authorize_youtube.py asks for: upload, plus read access for the channel name and the
+# analytics pull that steers what the channel makes next.
+YOUTUBE_ALL_SCOPES = YOUTUBE_UPLOAD_SCOPES + [YOUTUBE_READONLY_SCOPE, YOUTUBE_ANALYTICS_SCOPE]
 
 
 def build_video_metadata(
@@ -64,9 +69,10 @@ def get_unattended_credentials(
 
     Raises PublishError (not sys.exit) if there is no usable token -- the
     caller decides whether to skip the upload or abort the run.
-    """
-    scopes = scopes or YOUTUBE_UPLOAD_SCOPES
 
+    With no ``scopes``, the token keeps every scope it was granted. Forcing upload-only here used to
+    narrow the saved token on each refresh, which silently broke the read-only analytics pull.
+    """
     if not token_path.exists():
         raise PublishError(
             f"No token file at {token_path}. Run the one-time interactive OAuth "
@@ -75,6 +81,7 @@ def get_unattended_credentials(
 
     try:
         token_data = json.loads(token_path.read_text(encoding="utf-8"))
+        scopes = scopes or token_data.get("scopes") or YOUTUBE_UPLOAD_SCOPES
         creds = credentials_factory(token_data, scopes)
     except Exception as exc:
         raise PublishError(f"Failed to load credentials from {token_path}: {exc}") from exc

@@ -4,7 +4,7 @@
 Unattended runs (publish.py) only ever refresh an existing token and never
 open a browser, so this must be run once, by hand, at the machine's own
 screen, before uploads can work. Needs client_secret.json (a Google Cloud
-"Desktop app" OAuth client with the YouTube Data API v3 enabled) at
+"Desktop app" OAuth client with the YouTube Data API v3 and YouTube Analytics API enabled) at
 publish.client_secrets_path.
 
 Usage:
@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from google_auth_oauthlib.flow import InstalledAppFlow
 from horrorvibes.config import load_config
 from horrorvibes.exceptions import PublishError
-from horrorvibes.publish import YOUTUBE_UPLOAD_SCOPES, get_unattended_credentials
+from horrorvibes.publish import YOUTUBE_ALL_SCOPES, get_unattended_credentials
 
 # pylint: enable=wrong-import-position,import-error
 
@@ -35,10 +35,9 @@ def main() -> int:
         print(f"Missing {secrets_path}: download the Desktop app OAuth client JSON from Google Cloud first.")
         return 1
 
-    # readonly is only here so this script can name the channel the token is bound to -- uploads
-    # themselves need nothing beyond YOUTUBE_UPLOAD_SCOPES.
-    scopes = YOUTUBE_UPLOAD_SCOPES + ["https://www.googleapis.com/auth/youtube.readonly"]
-    flow = InstalledAppFlow.from_client_secrets_file(str(secrets_path), scopes)
+    # Upload, plus read-only access: youtube.readonly names the channel below and lists past uploads;
+    # yt-analytics.readonly lets scripts/channel_analytics.py measure what keeps viewers watching.
+    flow = InstalledAppFlow.from_client_secrets_file(str(secrets_path), YOUTUBE_ALL_SCOPES)
     print(
         "In the browser, pick the CHANNEL you want uploads to go to (a Brand Account such as a\n"
         "second channel is listed separately from the Google account that manages it)."
