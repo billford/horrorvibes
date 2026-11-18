@@ -2,8 +2,10 @@
 
 from PIL import Image
 
-from horrorvibes.compositor import compose_frame, select_font_path
-from horrorvibes.config import CompositorConfig
+import pytest
+
+from horrorvibes.compositor import compose_frame, flatten_frame, render_text_layers, select_font_path
+from horrorvibes.config import CompositorConfig, load_config
 
 
 def test_select_font_path_returns_first_existing_path(tmp_path):
@@ -76,3 +78,47 @@ def test_compose_frame_handles_long_multiline_quotes(tmp_path):
     compose_frame(background_path, long_quote, _config(), 200, 300, output_path)
 
     assert output_path.exists()
+
+
+# ---- style-pack text layers -----------------------------------------------------------
+
+
+@pytest.fixture
+def config(tmp_path):
+    return load_config(tmp_path / "missing.yaml").compositor
+
+
+def test_karaoke_layers_have_one_state_per_word_plus_unlit(tmp_path, config):
+    pack = load_config(tmp_path / "missing.yaml").style_packs[1]
+    layers = render_text_layers("We all go mad", "Psycho (1960)", pack, config, 540, 960, tmp_path, 0)
+    assert layers.word_count == 4
+    assert len(layers.word_states) == 5
+    with Image.open(layers.word_states[0]) as unlit, Image.open(layers.word_states[-1]) as lit:
+        assert unlit.mode == "RGBA" and unlit.size == (540, 960)
+        # unlit words are drawn translucent; lit words fully opaque
+        assert unlit.getchannel("A").getextrema()[1] < 255 == lit.getchannel("A").getextrema()[1]
+
+
+def test_static_layers_have_single_state(tmp_path, config):
+    pack = load_config(tmp_path / "missing.yaml").style_packs[0]
+    layers = render_text_layers("Redrum", "The Shining", pack, config, 540, 960, tmp_path, 2, karaoke=False)
+    assert len(layers.word_states) == 1 and layers.title.name == "title_3.png"
+
+
+def test_long_text_is_shrunk_to_fit_frame(tmp_path, config):
+    pack = load_config(tmp_path / "missing.yaml").style_packs[2]  # Courier: wide glyphs
+    title = "A Very Long Title Of A Film (1999)"
+    layers = render_text_layers("x" * 25, title, pack, config, 540, 960, tmp_path, 0)
+    with Image.open(layers.word_states[-1]) as img:
+        bbox = img.getchannel("A").getbbox()
+    assert bbox[0] > 0 and bbox[2] < 540
+
+
+def test_flatten_frame_writes_rgb_still(tmp_path, config):
+    bg = tmp_path / "bg.png"
+    Image.new("RGB", (100, 200), (40, 0, 0)).save(bg)
+    pack = load_config(tmp_path / "missing.yaml").style_packs[0]
+    layers = render_text_layers("Boo", "Film", pack, config, 540, 960, tmp_path, 0)
+    out = flatten_frame(bg, layers, 540, 960, tmp_path / "f.png")
+    with Image.open(out) as img:
+        assert img.mode == "RGB" and img.size == (540, 960)

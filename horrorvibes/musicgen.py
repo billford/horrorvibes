@@ -342,18 +342,25 @@ def generate_music(
     backends: dict[str, Callable[[str, int, Path], None]] | None = None,
     rng: random.Random | None = None,
     duration_sec: float | None = None,
+    mood_anchor: str | None = None,
+    mood_pool: list[str] | None = None,
 ) -> MusicResult:
     """Generate (or fetch a fallback for) the run's background music track.
 
     ``duration_sec``, if given, overrides the nominal quote_count *
     duration_per_quote_sec duration -- used when voiceover narration has
     stretched the actual video length beyond the nominal one.
+    ``mood_anchor`` / ``mood_pool`` override the configured mood (the
+    run's style pack sets these).
     """
     backends = backends if backends is not None else default_backends(config, api_key)
     chain = _BACKEND_CHAIN[config.music.backend]
 
     prompt = build_music_prompt(
-        config.music.mood_anchor, config.music.mood_pool, config.music.mood_pool_sample_size, rng
+        mood_anchor or config.music.mood_anchor,
+        mood_pool or config.music.mood_pool,
+        config.music.mood_pool_sample_size,
+        rng,
     )
     if duration_sec is not None:
         duration_ms = clamp_duration_ms(duration_sec * 1000)

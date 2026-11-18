@@ -36,6 +36,7 @@ def build_video_metadata(
     tags: list[str],
     category_id: str,
     privacy_status: str,
+    contains_synthetic_media: bool = True,
 ) -> dict[str, Any]:
     """Pure construction of the YouTube API request body."""
     return {
@@ -48,6 +49,7 @@ def build_video_metadata(
         "status": {
             "privacyStatus": privacy_status,
             "selfDeclaredMadeForKids": False,
+            "containsSyntheticMedia": contains_synthetic_media,
         },
     }
 
@@ -141,6 +143,7 @@ def publish(
     )
     service = youtube_service_factory(creds)
     metadata = build_video_metadata(
-        title, description, tags, publish_config.category_id, publish_config.privacy_status
+        title, description, tags, publish_config.category_id, publish_config.privacy_status,
+        publish_config.contains_synthetic_media,
     )
     return upload_video(video_path, metadata, service, media_factory)

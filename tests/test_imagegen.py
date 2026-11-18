@@ -8,13 +8,21 @@ non-pytest smoke test of actual local SD inference).
 
 # pylint: disable=missing-function-docstring,missing-class-docstring,redefined-outer-name,unused-argument,unnecessary-lambda,import-outside-toplevel,use-implicit-booleaness-not-comparison
 import dataclasses
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
 
 from horrorvibes.config import load_config
 from horrorvibes.exceptions import ImageGenerationError
-from horrorvibes.imagegen import build_sd_prompt, generate_image, render_gradient
+from horrorvibes.imagegen import (
+    MfluxBackend,
+    build_scene_prompt,
+    build_sd_prompt,
+    generate_image,
+    render_gradient,
+)
 
 
 @pytest.fixture
@@ -178,3 +186,108 @@ def test_closest_supported_size_uses_gpt_image_portrait_size():
     assert _closest_supported_size("gpt-image-1", 1080, 1920) == "1024x1536"
     assert _closest_supported_size("gpt-image-1", 1920, 1080) == "1536x1024"
     assert _closest_supported_size("dall-e-3", 1080, 1920) == "1024x1792"
+
+
+# ---- mflux backend & scene prompts ---------------------------------------------------
+
+
+def test_scene_prompt_combines_scene_style_and_portrait_no_text():
+    prompt = build_scene_prompt("A fog-bound pier at dusk.", "woodcut print")
+    assert prompt.startswith("A fog-bound pier at dusk. woodcut print.")
+    assert "no text" in prompt
+
+
+def test_generate_image_prefers_visual_scene_and_pack_style(tmp_path):
+    config = load_config(tmp_path / "missing.yaml")
+    prompts = []
+    backends = {name: (lambda p, i, out: (prompts.append(p), out.write_bytes(b"x"))) for name in ("mflux",)}
+
+    result = generate_image(
+        "'Redrum.' - The Shining", 0, config, tmp_path, backends=backends,
+        visual_scene="An empty hotel corridor", style="VHS still",
+    )
+
+    assert result.backend_used == "mflux"
+    assert prompts[0].startswith("An empty hotel corridor. VHS still.")
+    assert "Shining" not in prompts[0]
+
+
+def test_mflux_cmd_and_missing_binary(tmp_path, monkeypatch):
+    config = load_config(tmp_path / "missing.yaml").image
+    backend = MfluxBackend(config, runner=lambda *a, **k: None)
+    cmd = backend.build_cmd("a prompt", 42, tmp_path / "o.png")
+    assert cmd[0] == "mflux-generate-flux2"
+    assert cmd[cmd.index("--model") + 1] == "flux2-klein-4b"
+    assert cmd[cmd.index("--prompt") + 1] == "a prompt"
+    assert cmd[cmd.index("--seed") + 1] == "42"
+
+    monkeypatch.setattr("horrorvibes.imagegen.shutil.which", lambda name: None)
+    with pytest.raises(ImageGenerationError, match="not found"):
+        backend("p", 0, tmp_path / "o.png")
+
+
+def test_mflux_failure_raises_so_chain_falls_through(tmp_path, monkeypatch):
+    config = load_config(tmp_path / "missing.yaml").image
+    monkeypatch.setattr("horrorvibes.imagegen.shutil.which", lambda name: "/usr/bin/mflux")
+    def runner(cmd, **kwargs):
+        return SimpleNamespace(returncode=1, stderr="oom")
+
+    with pytest.raises(ImageGenerationError, match="oom"):
+        MfluxBackend(config, runner=runner)("p", 0, tmp_path / "o.png")
+
+
+def test_mflux_found_beside_python_when_not_on_path(tmp_path, monkeypatch):
+    config = load_config(tmp_path / "missing.yaml").image
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / config.mflux_command).write_text("#!/bin/sh\n")
+    monkeypatch.setattr("horrorvibes.imagegen.shutil.which", lambda name: None)
+    monkeypatch.setattr("horrorvibes.imagegen.sys.executable", str(fake_bin / "python"))
+    calls = []
+
+    def runner(cmd, **kwargs):
+        calls.append(cmd)
+        Path(cmd[cmd.index("--output") + 1]).write_bytes(b"png")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    MfluxBackend(config, runner=runner)("p", 0, tmp_path / "o.png")
+
+    assert calls[0][0] == str(fake_bin / config.mflux_command)
+
+
+def _framed(path, border_colour, inner_colour=(40, 40, 40), size=(200, 300), border=12):
+    img = Image.new("RGB", size, border_colour)
+    inner = Image.effect_noise((size[0] - 2 * border, size[1] - 2 * border), 60).convert("RGB")
+    img.paste(inner, (border, border))
+    img.save(path)
+
+
+def test_trim_border_removes_a_light_print_border_and_keeps_size(tmp_path):
+    from horrorvibes.imagegen import trim_border
+
+    path = tmp_path / "b.png"
+    _framed(path, (255, 255, 255))
+    assert trim_border(path) is True
+    with Image.open(path) as img:
+        assert img.size == (200, 300)
+        assert img.getpixel((0, 0)) != (255, 255, 255)
+
+
+def test_trim_border_leaves_dark_edges_alone(tmp_path):
+    from horrorvibes.imagegen import trim_border
+
+    path = tmp_path / "b.png"
+    _framed(path, (0, 0, 0))  # a night scene that's black at every edge
+    before = path.read_bytes()
+    assert trim_border(path) is False
+    assert path.read_bytes() == before
+
+
+def test_trim_border_needs_all_four_sides(tmp_path):
+    from horrorvibes.imagegen import trim_border
+
+    path = tmp_path / "b.png"
+    img = Image.effect_noise((200, 300), 60).convert("RGB")
+    img.paste((255, 255, 255), (0, 0, 200, 40))  # bright sky along the top only
+    img.save(path)
+    assert trim_border(path) is False

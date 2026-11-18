@@ -18,6 +18,7 @@ __pycache__/
 quotes_history.txt
 video_catalog.jsonl
 movie_history.jsonl
+episode_history.jsonl
 smoke_test_output.png
 smoke_test_music.mp3
 

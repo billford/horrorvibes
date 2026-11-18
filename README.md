@@ -23,7 +23,7 @@ but is superseded by the `horrorvibes/` package described below.
   `sys.exit()`, real logging instead of `print()`, and a full pytest suite. `pylint` and `bandit` both run
   clean (see `pyproject.toml`).
 - **Automation**: designed to run unattended via `launchd` on a Mac (see `com.billford.horrorvibes.plist`),
-  every other day, including the YouTube upload step -- with a macOS notification if a run fails.
+  once a day, including the YouTube upload step -- with a macOS notification if a run fails.
 
 ## Architecture
 
@@ -71,50 +71,99 @@ python3 run.py                # full pipeline, uploads to YouTube if publish.you
 - `--config PATH`: use a config file other than `./config.yaml`
 - `--quotes N`: override `run.quote_count` for this invocation
 - `--dry-run`: run the full pipeline but never upload to YouTube
-- `--force`: ignore the every-other-day cadence guard and run now
+- `--force`: ignore the cadence guard and run now
 
 Everything else (image/music backends, prompts, fonts, privacy status, logging, cadence) lives in
 `config.yaml` -- see `config.sample.yaml` for the full annotated list of settings.
 
-## Quote accuracy
+## Quote accuracy and variety
 
-Quote generation still goes through the same OpenAI chat model as v1 (see Non-Goals) -- what changed is the
-prompt and `quotes.temperature` (0.7, down from the API's 1.0 default). A chat model asked for "impactful,
-unique, non-overused" horror quotes at high temperature has real incentive to invent a plausible-sounding
-line or misattribute a real one to the wrong film. The system prompt now explicitly tells the model accuracy
-matters more than novelty, and to pick a different, well-documented quote rather than guess at one it isn't
-confident about; the lower temperature makes it lean on what it actually knows rather than get creative. This
-narrows but doesn't eliminate the risk -- there's no external quote database cross-check here, so a wrong
-attribution is still possible. `quotes.py`'s history/dedup file gives you a durable record of exactly what was
-generated per run if you want to spot-check attributions after the fact.
+Quotes come from the OpenAI **Responses API** with a strict JSON schema (`quote, title, year, medium, speaker,
+confidence`), so there is no free-text parsing. `quotes.model` defaults to `gpt-5.5`. Reasoning models reject
+`temperature`, so it is only sent when set.
 
-Beyond exact-text dedup, `quotes.py` also tracks which movie/show each quote came from in
-`quotes.movie_history_path` (default `./movie_history.jsonl`) and avoids picking another quote from that same
-title for `quotes.movie_cooldown_days` (default 14) -- both within a single run's batch and across separate
-runs. This is a second, independent guard: two differently-worded quotes can still both be from, say, *The
-Shining*, and exact-text dedup alone wouldn't catch that a video (or two nearby videos) is dominated by one
-film.
+**Variety.** Each quote is requested against its own randomly sampled brief, a combination of decade,
+subgenre (`quotes.themes`), region (`quotes.regions`, weighted) and film or TV (`quotes.tv_share`). The
+prompt also lists the titles still in cooldown and the most recently used lines as exclusions, so the model
+avoids them up front instead of having them filtered out afterwards. After generation:
+
+- **Titles** are compared with the year, a leading article and punctuation removed, so *The Shining (1980)*
+  and *Shining* are treated as the same film. A title can't recur within `quotes.movie_cooldown_days`
+  (default 30) or twice in one video.
+- **Quotes** are compared by their text alone, with fuzzy matching (`quotes.fuzzy_dup_threshold`, default
+  0.88). A reworded or differently punctuated repeat is still caught.
+
+**Accuracy.** The model rates its own confidence. Low-confidence lines are always dropped, and
+medium-confidence lines are kept only when verification is on. With `quotes.verify: true` (the default), a
+second request uses the `web_search` tool to check every candidate. Lines it can't confirm are dropped, and
+wrong years are corrected. If the verification call itself fails, the run keeps the candidates and logs a
+warning rather than failing. `quotes_history.txt` and `video_catalog.jsonl` still record exactly what went
+out, if you want to spot-check.
+
+See `docs/specs/v3-diversity.md` for the diagnosis behind these changes and the planned video-side work.
+
+## Style packs and episodes
+
+Every run gets a **style pack**, rotated least-recently-used, so consecutive videos never share a look and
+all six come round before any pack repeats. A pack sets:
+
+- the image style
+- font, text layout and colours
+- ffmpeg colour grade and film texture
+- transitions
+- music mood
+- narration voice
+
+The built-in packs are `expressionist_oil`, `grindhouse_poster`, `vhs_found_footage`, `woodcut_folk`,
+`cosmic_void` and `polaroid_evidence`. They live in `DEFAULTS["style_packs"]` in `horrorvibes/config.py`.
+Defining `style_packs:` in config.yaml replaces the whole list.
+
+Each run is also an **episode**: either a mixed bag, or (`episodes.themed_share` of the time) a themed
+format such as *Folk Horror Night*, *Lines Spoken by Horror Villains*, *Chilling Last Words*, *Asian
+Horror*, *80s Horror*, *Classic Monster Movies*, *Horror TV* or *Cosmic & Sci-Fi Horror*. A format narrows
+the quote briefs (subgenres, decades, regions, film vs TV) or adds an instruction for the model, and it
+supplies the video's headline. Quote count varies between `episodes.quote_count_min` and
+`episodes.quote_count_max` (6-12 by default). Packs and formats are recorded in
+`episodes.history_path`, and in `video_catalog.jsonl` (`style_pack`, `episode_format`, `headline`), so
+you can see which looks perform best.
+
+## Motion and captions
+
+With `motion.enabled` (the default), each quote becomes its own clip. The background gets a slow Ken Burns
+zoom, alternating in and out, and then the pack's colour grade and texture (grain, VHS or none). The
+attribution fades in. The quote is a karaoke caption: words light up as they are narrated, timed from
+ElevenLabs' character timings (estimated when those aren't available). Clips render four at a time and
+are joined with the pack's `xfade` transitions. Each transition starts exactly at the next quote's
+narration, so audio and video stay aligned.
+
+Captions are rendered with PIL as layer images, not subtitles, so this works with the stock Homebrew
+`ffmpeg`, which has no `libass`. Text is kept out of the Shorts UI zones (the top ~10% and bottom ~22%),
+and it shrinks automatically to fit wide fonts. If the animated render fails for any reason, the run logs
+a warning and falls back to the original static frame-by-frame assembly. A run never fails on motion.
 
 ## Image generation
 
-`image.backend` in config.yaml picks where the fallback chain *starts*; it always continues
-`local_sd -> openai -> gradient` from there (so `backend: openai` skips local SD entirely and starts at
-OpenAI; `backend: gradient` never calls an API at all). The SD prompt is built from the quote's mood + movie
-title + a fixed "expressionist horror art" style suffix -- it deliberately never asks the model to render the
-quote text itself (SD is unreliable at in-image typography; the words are composited separately, see
-`compositor.py`).
+`image.backend` picks where the fallback chain *starts*. It always continues
+`mflux -> local_sd -> openai -> gradient` from there.
 
-**Model choice**: `config.sample.yaml` ships with `stabilityai/stable-diffusion-xl-base-1.0` at 30 steps.
-An earlier version defaulted to `stabilityai/sdxl-turbo` (few-step, fast) for a quicker run, but a real
-production run on 2026-07-14 showed turbo's 1-4 step distillation trades away too much prompt adherence --
-the generated images stopped meaningfully relating to their quote/movie. If you want to trade fidelity back
-for speed, `sdxl-turbo` with `sd_guidance_scale: 0.0` is the faster option -- do your own visual bake-off
-before committing, since the tradeoff is real in both directions.
+- **Prompt**: the quote model writes an original `visual_scene` for every quote: setting, light and
+  atmosphere, never the film's actual characters, actors or logos. The style pack's `image_style` is
+  appended to it. Quote text is never rendered by the model; it's composited separately.
+- **`mflux` (default)**: FLUX.2 Klein through [mflux](https://github.com/filipstrand/mflux) on Apple MLX,
+  invoked as the `mflux-generate-flux2` CLI. Install it with `pip install mflux` in the run's venv. It's
+  Apple Silicon only, so it isn't in `requirements.txt`. diffusers on MPS is unreliable for FLUX, which is
+  why this is a separate backend. If the command is missing or fails, the run falls through to SDXL.
+  The default is `flux2-klein-4b`. The 9B variant is gated on Hugging Face under a non-commercial licence.
+  In a 2026-11-16 bake-off on lola, 4B took ~19 s per image against ~88 s for SDXL, with clearly better
+  prompt adherence. To compare again:
+  `python3 scripts/smoke_test_imagegen.py "'A quote.' - A Movie (Year)"` with `image.backend` set to
+  `mflux`, then to `local_sd`.
+- **`local_sd`**: SDXL base 1.0 at 30 steps. `sdxl-turbo` was dropped after a 2026-07-14 run showed poor
+  prompt adherence.
+- **`openai`**: `gpt-image-2` at 1024x1536 portrait.
 
-**Testing**: `tests/test_imagegen.py` covers prompt construction and the fallback chain's control flow with
-injected fake backends -- it never loads a real model. Real local inference is not exercised by pytest (too
-slow/heavy for CI); use `python3 scripts/smoke_test_imagegen.py "'A quote.' - A Movie (Year)"` to manually
-eyeball actual output quality/timing after changing the model or prompt.
+**Testing**: `tests/test_imagegen.py` covers prompt construction, the `mflux` argv and the fallback chain
+with fakes. It never loads a model.
 
 ## Music generation
 
@@ -145,7 +194,7 @@ texture, which is the only kind of output this prompt asks for.
 [ElevenLabs Music API](https://elevenlabs.io/docs/api-reference/music) once per run, sized to the whole
 video's duration. **Costs real money, not a repurposed existing subscription**: as of this writing, priced at
 **$0.15/minute** (~900 credits/minute on subscription plans). At 12 quotes x 10s = 120s (2 minutes) per video,
-and roughly 15 runs/month on an every-other-day cadence, that's about **$4.50/month**, or ~27,000 credits/month
+and roughly 30 runs/month on a daily cadence, that's about **$9/month**, or ~54,000 credits/month
 -- confirm current pricing at https://elevenlabs.io/pricing/api before enabling this. You'll need a separate
 `ELEVENLABS_API_KEY`, and note that ElevenLabs lets you cap an individual key's own credit quota separately
 from your account's overall balance (a useful blast-radius limit, but easy to forget you set it to 0 on a
@@ -163,8 +212,11 @@ whatever `music.backend` is currently set.
 
 ## Voiceover narration (experimental, opt-in)
 
-`voiceover.enabled: true` reads each quote aloud via the ElevenLabs text-to-speech API in a configurable
-voice (`voiceover.voice_id`, defaults to "Clyde" -- audition others at
+`voiceover.enabled: true` reads each quote aloud via the ElevenLabs text-to-speech API. It defaults to
+`eleven_v3` with a per-quote delivery tag (`[whispers]`, `[menacing]`, `[calm]`, ...) chosen by the quote
+model. A failed v3 request retries on `voiceover.fallback_model_id`, untagged, and then on the default
+voice, and a model/voice pair that has failed isn't retried for the rest of the run. Style packs may set
+their own voice. The default is `voiceover.voice_id` (defaults to "Clyde" -- audition others at
 [elevenlabs.io/voice-library](https://elevenlabs.io/voice-library) and swap freely), mixed into the
 background music track with the music **ducking** (quieting) during each narration clip's exact known
 window, then restoring to full volume in the gaps between quotes.
@@ -249,9 +301,10 @@ corrupt it.
 
 ## Automation on your Mac (launchd)
 
-`com.billford.horrorvibes.plist` is a `launchd` user agent template. **launchd has no native "every N days"
-schedule** -- it fires once a day, and `horrorvibes.orchestrator.is_run_due()` decides whether to actually do
-anything, based on `automation.min_hours_between_runs` (default 36h) and the last recorded run in
+`com.billford.horrorvibes.plist` is a `launchd` user agent template. It fires once a day, and
+`horrorvibes.orchestrator.is_run_due()` decides whether to actually do anything, based on
+`automation.min_hours_between_runs` (default 12h, which allows one run per day; set it to 36 for every
+other day) and the last recorded run in
 `automation.state_file`. This is why `logs/last_run.json` exists.
 
 Before installing:

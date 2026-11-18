@@ -20,6 +20,9 @@ def build_catalog_entry(
     youtube_video_id: str | None,
     timestamp: datetime,
     music_backend: str | None = None,
+    style_pack: str | None = None,
+    episode_format: str | None = None,
+    headline: str | None = None,
 ) -> dict:
     """Pure construction of one catalog record -- no I/O. ``music_backend``
     records where the audio came from, so a copyright claim on an uploaded
@@ -29,6 +32,9 @@ def build_catalog_entry(
         "video_path": str(video_path),
         "youtube_video_id": youtube_video_id,
         "music_backend": music_backend,
+        "style_pack": style_pack,
+        "episode_format": episode_format,
+        "headline": headline,
         "quotes": [
             {"quote": quote_text, "movie": movie}
             for quote_text, movie in (split_quote_and_title(quote) for quote in quotes)

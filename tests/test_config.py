@@ -10,7 +10,9 @@ from horrorvibes.config import ConfigError, load_config
 def test_defaults_load_with_no_file(tmp_path):
     config = load_config(tmp_path / "does_not_exist.yaml")
     assert config.run.quote_count == 9
-    assert config.image.backend == "local_sd"
+    assert config.image.backend == "mflux"
+    assert config.quotes.model == "gpt-5.6-sol"
+    assert len(config.style_packs) >= 6
     assert config.music.backend == "elevenlabs"
     assert config.publish.privacy_status == "private"
 
@@ -100,3 +102,49 @@ def test_paths_are_resolved_to_path_objects(tmp_path):
     config = load_config(tmp_path / "missing.yaml")
     assert isinstance(config.run.quotes_dir, Path)
     assert isinstance(config.publish.token_path, Path)
+
+
+def _write_yaml(tmp_path, text):
+    path = tmp_path / "config.yaml"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_rejects_unknown_transition(tmp_path):
+    path = _write_yaml(tmp_path, "style_packs:\n  - name: x\n    image_style: y\n    transitions: [spin]\n")
+    with pytest.raises(ConfigError, match="transitions"):
+        load_config(path)
+
+
+def test_rejects_duplicate_pack_names(tmp_path):
+    path = _write_yaml(
+        tmp_path, "style_packs:\n  - {name: a, image_style: y}\n  - {name: a, image_style: z}\n"
+    )
+    with pytest.raises(ConfigError, match="unique"):
+        load_config(path)
+
+
+def test_rejects_bad_caption_mode_and_count_range(tmp_path):
+    with pytest.raises(ConfigError, match="caption_mode"):
+        load_config(_write_yaml(tmp_path, "motion:\n  caption_mode: subtitles\n"))
+    with pytest.raises(ConfigError, match="quote_count_min"):
+        load_config(_write_yaml(tmp_path, "episodes:\n  quote_count_min: 9\n  quote_count_max: 4\n"))
+
+
+@pytest.mark.parametrize("key,value", [("drift", 1.5), ("ripple_px", 50), ("flicker", -0.1)])
+def test_rejects_out_of_range_motion_effects(tmp_path, key, value):
+    with pytest.raises(ConfigError, match=key):
+        load_config(_write_yaml(tmp_path, f"motion:\n  {key}: {value}\n"))
+
+
+def test_motion_effects_default_on(tmp_path):
+    motion = load_config(tmp_path / "missing.yaml").motion
+    assert motion.drift > 0 and motion.ripple_px > 0 and motion.flicker > 0
+
+
+def test_style_pack_and_episode_format_parse(tmp_path):
+    config = load_config(tmp_path / "missing.yaml")
+    pack = config.style_packs[0]
+    assert isinstance(pack.text_color, tuple) and len(pack.text_color) == 3
+    eighties = next(f for f in config.episodes.formats if f.name == "eighties")
+    assert eighties.decades == [1980]

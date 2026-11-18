@@ -1,5 +1,6 @@
 # pylint: disable=missing-function-docstring,missing-class-docstring,redefined-outer-name,unused-argument,unnecessary-lambda,import-outside-toplevel,use-implicit-booleaness-not-comparison
 
+import dataclasses
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,10 +9,16 @@ import pytest
 
 from horrorvibes.exceptions import VideoAssemblyError
 from horrorvibes.video import (
+    ClipSpec,
+    MotionStyle,
+    assemble_motion_video,
     assemble_video,
+    build_clip_cmd,
     build_concat_file_content,
     build_mux_audio_cmd,
     build_silent_video_cmd,
+    build_xfade_cmd,
+    effective_transition_sec,
 )
 
 
@@ -135,3 +142,104 @@ def test_assemble_video_raises_on_empty_frame_list(tmp_path):
     with pytest.raises(VideoAssemblyError):
         assemble_video([], tmp_path / "out.mp4", None, [], fps=30, runner=runner)
     assert runner.calls == []
+
+
+# ---- animated assembly -------------------------------------------------------------
+
+
+
+def _clip(tmp_path, n_states=3, duration=5.0):
+    states = [tmp_path / f"s{k}.png" for k in range(n_states)]
+    return ClipSpec(
+        background=tmp_path / "bg.png", title=tmp_path / "t.png", word_states=states,
+        state_times=[0.0, 1.0, 2.0][:n_states], duration=duration,
+    )
+
+
+def test_effective_transition_is_clamped_to_half_shortest_clip():
+    assert effective_transition_sec([10, 1.0, 8], 0.8) == 0.5
+    assert effective_transition_sec([10, 10], 0.8) == 0.8
+    assert effective_transition_sec([10], 0.8) == 0.0
+
+
+def test_clip_cmd_feeds_background_once_and_loops_layers(tmp_path):
+    style = MotionStyle(grade="eq=saturation=0.5")
+    cmd = build_clip_cmd(_clip(tmp_path), 5.8, style, 1080, 1920, 30, tmp_path / "c.mp4")
+    bg_index = cmd.index(str(tmp_path / "bg.png"))
+    # not looped: zoompan emits d frames per input frame
+    assert cmd[bg_index - 1] == "-i" and cmd[bg_index - 2] != "1"
+    assert cmd.count("-loop") == 4  # title + 3 caption states
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "zoompan=z='1.06+0.1*on/174'" in graph and "d=174" in graph
+    assert "eq=saturation=0.5" in graph
+    assert "enable='between(t,1.000,1.999)'" in graph
+    assert "noise=" in graph and "vignette" in graph
+
+
+def test_clip_filter_pans_ripples_and_flickers_the_background(tmp_path):
+    spec = dataclasses.replace(_clip(tmp_path), drift_x=1.0, drift_y=-0.5)
+    cmd = build_clip_cmd(spec, 5.8, MotionStyle(drift=0.8, ripple_px=3.0, flicker=0.02),
+                         1080, 1920, 30, tmp_path / "c.mp4")
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "x='(iw-iw/zoom)*(0.5+0.800*(on/174-0.5))'" in graph
+    assert "y='(ih-ih/zoom)*(0.5+-0.400*(on/174-0.5))'" in graph
+    assert "nullsrc=s=134x240:r=30:d=5.800" in graph and "[z][mx][my]displace" in graph
+    assert "eq=brightness='0.02*sin(t*6.3)" in graph
+    # effects land on the background, before captions are laid over it
+    assert graph.index("displace") < graph.index("[bg][title]overlay")
+
+
+def test_clip_filter_effects_can_be_turned_off(tmp_path):
+    style = MotionStyle(drift=0, ripple_px=0, flicker=0)
+    graph = build_clip_cmd(_clip(tmp_path), 5, style, 1080, 1920, 30, tmp_path / "c.mp4")
+    graph = graph[graph.index("-filter_complex") + 1]
+    assert "zoompan=z='1+" in graph
+    assert "displace" not in graph and "nullsrc" not in graph and "brightness" not in graph
+
+
+def test_clip_filter_static_caption_fades_in(tmp_path):
+    spec = dataclasses.replace(_clip(tmp_path, n_states=1), state_times=[0.4])
+    style = MotionStyle(overlay="none", vignette=False)
+    cmd = build_clip_cmd(spec, 5, style, 1080, 1920, 30, tmp_path / "c.mp4")
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "fade=t=in:st=0.400" in graph and "noise=" not in graph and "vignette" not in graph
+
+
+def test_xfade_offsets_start_each_transition_at_the_next_quote(tmp_path):
+    clips = [tmp_path / f"c{i}.mp4" for i in range(3)]
+    cmd = build_xfade_cmd(
+        clips, [4.0, 6.5, 3.0], ["fade", "pixelize"], 0.8,
+        tmp_path / "a.mp3", tmp_path / "o.mp4", MotionStyle(),
+    )
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "xfade=transition=fade:duration=0.8:offset=4.000" in graph
+    assert "xfade=transition=pixelize:duration=0.8:offset=10.500" in graph
+    assert cmd[cmd.index("-map", cmd.index("-map") + 1) + 1] == "3:a"
+
+
+def test_assemble_motion_video_renders_each_clip_then_joins(tmp_path):
+    calls = []
+
+    def runner(cmd, **kwargs):
+        calls.append(cmd)
+        Path(cmd[-1]).write_bytes(b"x")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    out = assemble_motion_video(
+        [_clip(tmp_path), _clip(tmp_path)], tmp_path / "out.mp4", None, MotionStyle(), ["fade"],
+        1080, 1920, 30, runner=runner,
+    )
+    assert out.read_bytes() == b"x"
+    assert len(calls) == 3 and "xfade" in " ".join(calls[-1])
+    first_clip_len = calls[0][calls[0].index("-t", calls[0].index("-map")) + 1]
+    assert first_clip_len == "5.800"  # duration + transition, so the xfade starts on time
+
+
+def test_assemble_motion_video_raises_on_ffmpeg_failure(tmp_path):
+    def runner(cmd, **kwargs):
+        return SimpleNamespace(returncode=1, stderr="boom")
+
+    with pytest.raises(VideoAssemblyError):
+        assemble_motion_video(
+            [_clip(tmp_path)], tmp_path / "o.mp4", None, MotionStyle(), [], 1080, 1920, 30, runner
+        )

@@ -22,29 +22,83 @@ run:
   video_catalog_path: ./video_catalog.jsonl
 
 quotes:
-  model: gpt-4
-  max_attempts: 5
-  # Lower than the API default (1.0) -- favors accurate attribution over
-  # creative invention. See quotes.build_quote_request for the full reasoning.
-  temperature: 0.7
+  # OpenAI Responses API model (structured JSON output). Confirm the current
+  # model name at https://developers.openai.com/api/docs/models before changing.
+  model: gpt-5.6-sol
+  reasoning_effort: low
+  # Reasoning models reject temperature; leave null to omit it.
+  temperature: null
+  max_attempts: 4
+  # Fact-check every candidate with the web_search tool and drop lines that
+  # can't be confirmed (~1 extra request per attempt). If the check itself
+  # errors, the run keeps the candidates rather than failing.
+  verify: true
+  verify_model: null   # null = same as model
+  # A quote whose text is at least this similar (0-1) to any past quote is a repeat.
+  fuzzy_dup_threshold: 0.88
+  # Max recently-used titles/quotes listed in the prompt as "don't use these".
+  exclusion_prompt_limit: 150
+  # Each quote gets its own (decade, subgenre, region, medium) brief so one
+  # video spans the genre instead of the same famous films every time.
   themes:
-    - classic horror
-    - modern horror
+    - slasher
+    - supernatural possession
+    - haunted house
+    - ghost story
+    - folk horror
+    - body horror
+    - cosmic horror
     - psychological horror
-    - slasher films
-    - supernatural horror
-    - zombie films
-    - vampire movies
-    - ghost stories
-  # Durable record of which movie/show each quote came from, so the same
-  # one isn't quoted again too soon (within a video, or across nearby runs).
+    - creature feature
+    - zombie
+    - vampire
+    - werewolf
+    - witchcraft
+    - found footage
+    - giallo
+    - gothic horror
+    - sci-fi horror
+    - survival horror
+    - home invasion
+    - horror comedy
+    - cult horror
+    - killer doll or toy
+    - anthology
+    - monster movie
+  decades: [1920, 1930, 1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020]
+  # Relative weights (set one to 0 to disable it). Weighted toward
+  # English-language titles, where quote recall and verification are most reliable.
+  regions:
+    American: 5
+    British: 2
+    Japanese: 1
+    South Korean: 1
+    Spanish: 0.5
+    Italian: 0.5
+    French: 0.5
+    Mexican: 0.5
+    Canadian: 0.5
+    Australian: 0.5
+  tv_share: 0.3        # fraction of slots asking for a TV series instead of a film
+  # Durable record of which movie/show each quote came from, so the same one
+  # isn't quoted again too soon (within a video, or across nearby runs).
   movie_history_path: ./movie_history.jsonl
-  movie_cooldown_days: 14
+  movie_cooldown_days: 30
 
 image:
-  # local_sd | openai | gradient -- this is the START of the fallback chain,
-  # which always continues local_sd -> openai -> gradient from wherever it starts.
-  backend: local_sd
+  # mflux | local_sd | openai | gradient -- this is the START of the fallback
+  # chain, which always continues mflux -> local_sd -> openai -> gradient.
+  backend: mflux
+  # FLUX.2 Klein via mflux (Apple MLX; `pip install mflux`). If the command
+  # isn't installed or fails, the run falls through to local SDXL below.
+  # 4B, not 9B: the 9B repo is gated on Hugging Face (non-commercial licence).
+  # Bake-off on lola 2026-11-16: ~19s/image vs ~88s for SDXL, much better prompt adherence.
+  mflux_command: mflux-generate-flux2
+  mflux_model: flux2-klein-4b
+  mflux_steps: 4
+  mflux_width: 768     # 9:16, divisible by 16; upscaled at render time
+  mflux_height: 1344
+  mflux_timeout_sec: 900
   # Full SDXL base, not sdxl-turbo: turbo's 1-4 step distillation trades away
   # prompt adherence for speed, at the cost of images not meaningfully
   # relating to their quote/movie. Do your own bake-off if speed matters more
@@ -54,8 +108,9 @@ image:
   sd_steps: 30
   sd_guidance_scale: 7.0
   sd_timeout_sec: 300
-  openai_model: gpt-image-1
+  openai_model: gpt-image-2
   openai_timeout_sec: 60
+  # Used only when a run has no style pack image_style (style packs normally set it).
   style_suffix: >-
     expressionist horror painting, dramatic chiaroscuro lighting,
     high-contrast brushwork, bruised muted palette, textured canvas
@@ -93,7 +148,14 @@ music:
 voiceover:
   enabled: false
   voice_id: N2lVS1w4EtoT3dr4eOWO  # "Callum" -- hoarse/intense; audition others at elevenlabs.io/voice-library and swap freely
-  model_id: eleven_multilingual_v2
+  # eleven_v3 voices each quote with a delivery tag ([whispers], [menacing]...)
+  # chosen by the quote model. A failed v3 request retries on fallback_model_id
+  # (untagged), then on voice_id if the style pack chose a different voice.
+  model_id: eleven_v3
+  fallback_model_id: eleven_multilingual_v2
+  use_delivery_tags: true
+  # Character timings drive word-by-word captions; estimated if unavailable.
+  use_timestamps: true
   stability: 0.5
   similarity_boost: 0.75
   style: 0.3
@@ -102,10 +164,14 @@ voiceover:
   api_timeout_sec: 60
   max_retries: 3
   retry_backoff_sec: 5
-  # Music volume during each narration's exact window (linear, 0-1), and a
-  # gain boost applied to narration so it isn't buried under the music bed.
+  # Every narration clip is levelled to narration_lufs and the music bed to
+  # music_lufs, so whispered lines are as audible as shouted ones. Then the
+  # music drops to duck_volume (linear, 0-1) under each narration, and
+  # narration_gain is an extra multiplier on top of the levelled voice.
   duck_volume: 0.3
-  narration_gain: 1.6
+  narration_gain: 1.0
+  narration_lufs: -16.0
+  music_lufs: -27.0
   # Extra seconds a quote stays on screen past its narration's own length, so
   # the next quote's narration never starts before this one has finished.
   narration_pad_sec: 1.0
@@ -128,6 +194,42 @@ publish:
   category_id: "17"
   client_secrets_path: ./client_secret.json
   token_path: ./token.json
+  # Tick YouTube's altered/synthetic media disclosure (images, music and narration are AI-generated).
+  contains_synthetic_media: true
+
+# Animated assembly: Ken Burns zoom per quote, style-pack colour grade and
+# film texture, xfade transitions, and word-synced captions. If rendering
+# fails for any reason the run falls back to static frames.
+motion:
+  enabled: true
+  transition_sec: 0.8
+  zoom_amount: 0.10
+  # Keep the image alive under the captions: slow pan (fraction of the zoom
+  # slack), heat-haze ripple (pixels) and candle flicker (brightness). 0 = off.
+  drift: 0.8
+  ripple_px: 3.0
+  flicker: 0.025
+  upscale_factor: 1.5
+  caption_mode: karaoke   # karaoke (words light up as narrated) | static
+  crf: 20
+  preset: medium
+
+# Each run is a mixed bag or (themed_share of the time) a themed episode,
+# with 6-12 quotes. When enabled this replaces run.quote_count; --quotes
+# still overrides it. Formats and headlines default to the built-in list in
+# horrorvibes/config.py -- add an `episodes.formats` list here to replace it.
+episodes:
+  enabled: true
+  history_path: ./episode_history.jsonl
+  themed_share: 0.4
+  quote_count_min: 6
+  quote_count_max: 12
+
+# Style packs (look, font, grade, transitions, music mood, voice) rotate
+# least-recently-used per run. Six ship built in (see DEFAULTS in
+# horrorvibes/config.py): expressionist_oil, grindhouse_poster,
+# vhs_found_footage, woodcut_folk, cosmic_void, polaroid_evidence.
+# Defining `style_packs:` here replaces that list entirely.
 
 logging:
   level: INFO
@@ -136,5 +238,7 @@ logging:
   backup_count: 3
 
 automation:
-  min_hours_between_runs: 36
+  # launchd fires daily at 09:00. 12h still stops a double run on the same day,
+  # while letting a manual afternoon run be followed by the next morning's run.
+  min_hours_between_runs: 12
   state_file: ./logs/last_run.json

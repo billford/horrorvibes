@@ -30,7 +30,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--dry-run", action="store_true", help="Run the full pipeline but never upload to YouTube"
     )
     parser.add_argument(
-        "--force", action="store_true", help="Ignore the every-other-day cadence guard and run now"
+        "--force", action="store_true", help="Ignore the cadence guard (min_hours_between_runs) and run now"
     )
     return parser.parse_args(argv)
 
