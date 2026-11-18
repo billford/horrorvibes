@@ -1,4 +1,4 @@
-# pylint: disable=missing-function-docstring
+# pylint: disable=missing-function-docstring,unbalanced-tuple-unpacking
 import json
 
 from horrorvibes import analytics
@@ -49,9 +49,8 @@ def test_summarize_uses_medians_and_skips_missing_keys():
 
 def test_load_catalog_keeps_only_uploaded_entries(tmp_path):
     path = tmp_path / "video_catalog.jsonl"
-    path.write_text(
-        json.dumps({"youtube_video_id": None}) + "\n" + json.dumps({"youtube_video_id": "v1"}) + "\nnot json\n"
-    )
+    lines = [json.dumps({"youtube_video_id": None}), json.dumps({"youtube_video_id": "v1"}), "not json"]
+    path.write_text("\n".join(lines) + "\n")
     assert list(analytics.load_catalog(path)) == ["v1"]
 
 

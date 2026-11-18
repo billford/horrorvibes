@@ -64,9 +64,8 @@ def fetch_uploads(youtube: Any) -> tuple[str, list[dict]]:
 
     uploads = []
     for batch in _chunks(video_ids, 50):
-        response = (
-            youtube.videos().list(part="snippet,contentDetails,statistics,status", id=",".join(batch)).execute()
-        )
+        parts = "snippet,contentDetails,statistics,status"
+        response = youtube.videos().list(part=parts, id=",".join(batch)).execute()
         for item in response.get("items", []):
             stats = item.get("statistics", {})
             snippet = item["snippet"]

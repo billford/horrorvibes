@@ -202,7 +202,10 @@ def test_publish_wires_credentials_service_and_upload_together(tmp_path):
 
 def test_get_unattended_credentials_keeps_the_tokens_own_scopes(tmp_path):
     token_path = tmp_path / "token.json"
-    granted = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/yt-analytics.readonly"]
+    granted = [
+        "https://www.googleapis.com/auth/youtube.upload",
+        "https://www.googleapis.com/auth/yt-analytics.readonly",
+    ]
     token_path.write_text('{"token": "x", "scopes": %s}' % str(granted).replace("'", '"'))
     seen = {}
 
