@@ -23,6 +23,7 @@ def build_catalog_entry(
     style_pack: str | None = None,
     episode_format: str | None = None,
     headline: str | None = None,
+    topic: str | None = None,
 ) -> dict:
     """Pure construction of one catalog record -- no I/O. ``music_backend``
     records where the audio came from, so a copyright claim on an uploaded
@@ -35,6 +36,7 @@ def build_catalog_entry(
         "style_pack": style_pack,
         "episode_format": episode_format,
         "headline": headline,
+        "topic": topic,
         "quotes": [
             {"quote": quote_text, "movie": movie}
             for quote_text, movie in (split_quote_and_title(quote) for quote in quotes)

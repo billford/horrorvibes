@@ -32,6 +32,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--force", action="store_true", help="Ignore the cadence guard (min_hours_between_runs) and run now"
     )
+    parser.add_argument(
+        "--format", choices=["story", "quotes"], default=None,
+        help="Make this kind of video regardless of the weekday schedule (stories.days)",
+    )
     return parser.parse_args(argv)
 
 
@@ -48,13 +52,14 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging(config.logging)
 
     chat_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    force = args.force or args.quotes is not None
+    force = args.force or args.quotes is not None or args.format is not None
     return main_unattended(
         config,
         chat_client,
         force=force,
         quote_count=args.quotes,
         elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY"),
+        video_format=args.format,
     )
 
 

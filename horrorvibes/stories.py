@@ -231,10 +231,37 @@ class Story:
         lines = [self.topic.pitch, "", "Sources:"]
         lines += [f"- {src['title']}: {src['url']}" for src in self.research.sources]
         lines += ["", "Narration and images are AI-generated; facts are checked against the sources above."]
+        lines += ["", " ".join(f"#{tag}" for tag in story_tags(self)[:5])]
         return "\n".join(lines)
 
 
 # ---- pure helpers -----------------------------------------------------------------------------
+
+
+_GENERIC_TAGS = ["conspiracycorner", "unexplained", "mystery", "legend", "truestory", "shorts"]
+_CATEGORY_TAGS = {
+    "ship": ["ghostship", "shipwreck", "maritimemystery"],
+    "object": ["cursedobject", "haunted"],
+    "light": ["mysterylights", "ufo"],
+    "cryptid": ["cryptid", "lakemonster"],
+    "haunted": ["haunted", "ghoststory"],
+    "conspiracy": ["conspiracy", "debunked"],
+}
+
+
+def story_tags(story: Story, max_tags: int = 15) -> list[str]:
+    """YouTube tags: the topic and place as tags, the category's tags, then generic ones."""
+    tags = [re.sub(r"[^A-Za-z0-9]", "", story.topic.name.title())]
+    tags.append(re.sub(r"[^A-Za-z0-9]", "", story.topic.place.split(",")[0].title()))
+    for key, extra in _CATEGORY_TAGS.items():
+        if key in story.topic.category:
+            tags += extra
+    tags += _GENERIC_TAGS
+    unique: list[str] = []
+    for tag in tags:
+        if tag and tag.lower() not in {t.lower() for t in unique}:
+            unique.append(tag)
+    return unique[:max_tags]
 
 
 def normalize_topic(name: str) -> str:
@@ -374,7 +401,7 @@ def build_script_request(
         "actually shows, then a quiet, eerie closing line. Present claims as claims ('the story "
         "goes', 'witnesses said', 'believers point to'), never as fact, and never as mockery. "
         f"Total length {cfg.words_min}-{cfg.words_max} words, split into {cfg.beats_min}-{cfg.beats_max} "
-        "beats. Each beat gets: narration; a visual_scene for one image (the real place, era, objects "
+        f"beats of at most {cfg.beat_words_max - 2} words each. Each beat gets: narration; a visual_scene for one image (the real place, era, objects "
         "and weather; people only as silhouettes or from behind; no real faces, logos, text, borders "
         "or gore); and a delivery tag.\n"
         "Write it as a story told aloud at night, not a report: short sentences, concrete sensory "
@@ -478,6 +505,9 @@ def script_problems(cfg: StoriesConfig, script: Script) -> list[str]:
     # 15% slack either way: the model counts words loosely, and a few words don't change the length much.
     if not cfg.words_min * 0.85 <= script.word_count <= cfg.words_max * 1.15:
         problems.append(f"{script.word_count} words")
+    longest = max((len(beat.narration.split()) for beat in script.beats), default=0)
+    if longest > cfg.beat_words_max:
+        problems.append(f"a {longest}-word beat")
     if "?" in script.title or "#" in script.title:
         problems.append("question or hashtag in title")
     if is_off_limits(script.title, script.narration):

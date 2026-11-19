@@ -828,3 +828,114 @@ def test_run_pipeline_records_episode_and_passes_pack_to_stages(config, monkeypa
     assert published["title"].startswith(tuple(h.format(n=3)[:12] for h in config.episodes.mixed_headlines))
     entry = json.loads(config.run.video_catalog_path.read_text().splitlines()[0])
     assert entry["style_pack"] == pack.name and entry["episode_format"] == "mixed"
+
+
+# ---- story Shorts ------------------------------------------------------------------
+
+
+def _story(names=None):
+    from horrorvibes import stories  # pylint: disable=import-outside-toplevel
+
+    beats = [
+        stories.Beat("The Octavius drifted in the ice.", "ice", "calm"),
+        stories.Beat("Its captain sat frozen at his desk.", "cabin", "whispers"),
+    ]
+    return stories.Story(
+        topic=stories.Topic("The Octavius", "Arctic", "1775", "A ghost ship.", "ghost ships and the sea"),
+        research=stories.Research("L", "R", [], names or [], [{"title": "S", "url": "https://a.org"}]),
+        script=stories.Script("The Octavius: The Ghost Ship Frozen in Time", beats),
+    )
+
+
+def _fake_tts(spoken):
+    def backend(text, output_path, model_id, voice_id):  # pylint: disable=unused-argument
+        spoken.append(text)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"mp3")
+
+    return backend
+
+
+def test_narrate_story_respells_a_name_the_transcript_missed(config, monkeypatch):
+    from horrorvibes import orchestrator  # pylint: disable=import-outside-toplevel
+
+    spoken = []
+    monkeypatch.setattr(voiceover, "default_backend", lambda cfg, key: _fake_tts(spoken))
+    transcripts = iter(
+        ["the ship drifted in the ice", "the ock tay vee us drifted", "its captain sat frozen"]
+    )
+    names = [{"name": "Octavius", "respelling": "ock-TAY-vee-us", "ipa": ""}]
+
+    narrations = orchestrator.narrate_story(config, _story(names), None, lambda path: next(transcripts))
+
+    assert len(narrations) == 2
+    assert any("ock-TAY-vee-us" in text for text in spoken)
+    assert "respell_1" in str(narrations[0].path)
+
+
+def test_narrate_story_gives_up_after_repeated_mispronunciation(config, monkeypatch):
+    from horrorvibes import orchestrator, stories  # pylint: disable=import-outside-toplevel
+
+    monkeypatch.setattr(voiceover, "default_backend", lambda cfg, key: _fake_tts([]))
+    names = [{"name": "Octavius", "respelling": "ock-TAY-vee-us", "ipa": ""}]
+    with pytest.raises(stories.StoryGenerationError, match="Octavius"):
+        orchestrator.narrate_story(config, _story(names), None, lambda path: "the ship drifted")
+
+
+def test_is_story_day_follows_config(config):
+    from horrorvibes import orchestrator  # pylint: disable=import-outside-toplevel
+
+    on = dataclasses.replace(config, stories=dataclasses.replace(config.stories, enabled=True))
+    assert orchestrator.is_story_day(on, datetime(2026, 11, 19))  # Thursday
+    assert not orchestrator.is_story_day(on, datetime(2026, 11, 17))  # Tuesday
+    assert not orchestrator.is_story_day(config, datetime(2026, 11, 19))  # disabled by default
+
+
+def test_failed_story_falls_back_to_a_quote_short(config, monkeypatch):
+    from horrorvibes import orchestrator, stories  # pylint: disable=import-outside-toplevel
+
+    def no_story(*args, **kwargs):
+        raise stories.StoryGenerationError("nothing passed")
+
+    ran = []
+    monkeypatch.setattr(orchestrator, "run_story_pipeline", no_story)
+    monkeypatch.setattr(
+        orchestrator, "run_pipeline",
+        lambda *a, **k: ran.append("quotes")
+        or orchestrator.RunResult(config.run.output_dir / "v.mp4", 4, None),
+    )
+    assert main_unattended(config, chat_client=None, force=True, video_format="story") == 0
+    assert ran == ["quotes"]
+
+
+def test_story_pipeline_publishes_story_title_and_sources(config, monkeypatch):
+    from horrorvibes import orchestrator, stories  # pylint: disable=import-outside-toplevel
+
+    _mock_non_voiceover_stages(monkeypatch)
+    monkeypatch.setattr(voiceover, "default_backend", lambda cfg, key: _fake_tts([]))
+    monkeypatch.setattr(voiceover, "narration_duration_sec", lambda path: 4.0)
+    monkeypatch.setattr(stories, "generate_story", lambda *a, **k: _story())
+    monkeypatch.setattr(orchestrator, "_build_final_audio_track", lambda cfg, music, *a: music)
+    published = {}
+    monkeypatch.setattr(
+        publish, "publish",
+        lambda path, title, desc, tags, cfg: published.update(title=title, desc=desc) or "yt1",
+    )
+    config = dataclasses.replace(
+        config,
+        publish=dataclasses.replace(config.publish, youtube_upload=True),
+        stories=dataclasses.replace(
+            config.stories,
+            history_path=config.run.output_dir / "sh.jsonl",
+            audit_dir=config.run.output_dir / "a",
+        ),
+    )
+
+    result = orchestrator.run_story_pipeline(config, chat_client=None)
+
+    assert result.youtube_video_id == "yt1"
+    assert published["title"] == "The Octavius: The Ghost Ship Frozen in Time"
+    assert "https://a.org" in published["desc"]
+    entry = json.loads(config.run.video_catalog_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert entry["episode_format"] == "story" and entry["topic"] == "The Octavius"
+    assert "The Octavius" in config.stories.history_path.read_text(encoding="utf-8")

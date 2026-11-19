@@ -278,6 +278,12 @@ DEFAULTS: dict[str, Any] = {
         "words_max": 130,
         "beats_min": 4,
         "beats_max": 6,
+        # Longest beat: one beat's narration is one screen of captions.
+        "beat_words_max": 32,
+        # Weekdays (lola local time) that run a story instead of a quote Short.
+        "days": ["mon", "thu", "fri", "sat", "sun"],
+        # Silence after each beat's narration before the next image.
+        "beat_pad_sec": 0.5,
         # Narration voice for stories (the user's own clone, once made). null = voiceover.voice_id.
         "voice_id": None,
     },
@@ -621,7 +627,13 @@ class StoriesConfig:  # pylint: disable=too-many-instance-attributes
     words_max: int
     beats_min: int
     beats_max: int
+    beat_words_max: int = 32
+    days: tuple[str, ...] = ("mon", "thu", "fri", "sat", "sun")
+    beat_pad_sec: float = 0.5
     voice_id: str | None = None
+
+
+_WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 
 def _build_stories(data: dict[str, Any], quotes_model: str) -> StoriesConfig:
@@ -632,7 +644,10 @@ def _build_stories(data: dict[str, Any], quotes_model: str) -> StoriesConfig:
         raise ConfigError("stories.words_min must be >= 1 and <= words_max")
     if not 1 <= int(data["beats_min"]) <= int(data["beats_max"]):
         raise ConfigError("stories.beats_min must be >= 1 and <= beats_max")
-    for key in ("topic_candidates", "max_topic_attempts", "min_sources"):
+    days = tuple(str(day).lower()[:3] for day in data["days"] or [])
+    if any(day not in _WEEKDAYS for day in days):
+        raise ConfigError(f"stories.days must be weekday names, e.g. {list(_WEEKDAYS)}")
+    for key in ("topic_candidates", "max_topic_attempts", "min_sources", "beat_words_max"):
         if int(data[key]) < 1:
             raise ConfigError(f"stories.{key} must be at least 1")
     return StoriesConfig(
@@ -650,6 +665,9 @@ def _build_stories(data: dict[str, Any], quotes_model: str) -> StoriesConfig:
         words_max=int(data["words_max"]),
         beats_min=int(data["beats_min"]),
         beats_max=int(data["beats_max"]),
+        beat_words_max=int(data["beat_words_max"]),
+        days=days,
+        beat_pad_sec=float(data["beat_pad_sec"]),
         voice_id=data["voice_id"] or None,
     )
 

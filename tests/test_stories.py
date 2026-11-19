@@ -110,7 +110,7 @@ def test_repeats_of_past_uploads_are_skipped(cfg):
 
 
 def test_script_shape_problems():
-    cfg = SimpleNamespace(words_min=10, words_max=20, beats_min=2, beats_max=3)
+    cfg = SimpleNamespace(words_min=10, words_max=20, beats_min=2, beats_max=3, beat_words_max=32)
     ok = stories.parse_script(_script())
     assert not stories.script_problems(cfg, ok)
     titled = stories.parse_script(_script(title="Real?"))

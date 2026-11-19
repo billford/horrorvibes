@@ -5,6 +5,7 @@ plus a macOS notification (since nobody is watching an unattended run).
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import os
@@ -19,7 +20,8 @@ from pathlib import Path
 from typing import Callable
 
 from horrorvibes import (
-    catalog, compositor, episode, imagegen, metadata, musicgen, publish, quotes, video, voiceover,
+    catalog, compositor, episode, imagegen, listenback, metadata, musicgen, publish, quotes, stories, video,
+    voiceover,
 )
 from horrorvibes.config import AutomationConfig, Config
 from horrorvibes.exceptions import HorrorVibesError, PublishError, VideoAssemblyError
@@ -433,14 +435,196 @@ def run_pipeline(  # pylint: disable=too-many-locals,too-many-arguments
     )
 
 
+# ---- story Shorts ---------------------------------------------------------------------------
+
+
+def is_story_day(config: Config, when: datetime) -> bool:
+    """True when stories are enabled and ``when`` falls on one of stories.days."""
+    stories_config = config.stories
+    if stories_config is None or not stories_config.enabled:
+        return False
+    return when.strftime("%a").lower() in stories_config.days
+
+
+def _narrate_beat(  # pylint: disable=too-many-arguments
+    config: Config,
+    text: str,
+    delivery: str,
+    out_dir: Path,
+    api_key: str | None,
+    voice_id: str | None,
+) -> voiceover.Narration:
+    result = voiceover.generate_narrations(
+        config.voiceover, [voiceover.NarrationItem(text=text, delivery=delivery)], out_dir,
+        api_key=api_key, voice_id=voice_id,
+    )[0]
+    if result is None:
+        raise stories.StoryGenerationError(f"Narration failed for: {text[:60]}")
+    return result
+
+
+def narrate_story(  # pylint: disable=too-many-arguments,too-many-locals
+    config: Config,
+    story: stories.Story,
+    api_key: str | None,
+    transcriber: listenback.Transcriber | None,
+    voice_id: str | None = None,
+    max_respells: int = 2,
+) -> list[voiceover.Narration]:
+    """One narration clip per beat, each listened back for its names.
+
+    A clip whose names don't come back in the transcript is regenerated with those names respelled,
+    up to ``max_respells`` times. If a name still fails, the story is abandoned
+    (StoryGenerationError): the channel never publishes a mispronunciation it has detected.
+    """
+    base_dir = config.run.output_dir / "narration"
+    names = story.research.names
+    narrations = []
+    for i, beat in enumerate(story.script.beats):
+        to_respell: list[dict] = []
+        beat_dir = base_dir / f"beat_{i + 1}"
+        narration = _narrate_beat(config, beat.narration, beat.delivery, beat_dir, api_key, voice_id)
+        for attempt in range(max_respells + 1):
+            if transcriber is None:
+                break
+            missing = listenback.missing_names(transcriber(narration.path), beat.narration, names)
+            if not missing:
+                break
+            logger.info(
+                "Beat %d: names not heard (%s), attempt %d",
+                i + 1, ", ".join(m["name"] for m in missing), attempt + 1,
+            )
+            if attempt == max_respells:
+                raise stories.StoryGenerationError(
+                    f"Beat {i + 1} still mispronounces {', '.join(m['name'] for m in missing)}"
+                )
+            to_respell += [m for m in missing if m not in to_respell]
+            spoken = listenback.respell(beat.narration, to_respell)
+            narration = _narrate_beat(
+                config, spoken, beat.delivery, Path(f"{beat_dir}_respell_{attempt + 1}"), api_key, voice_id
+            )
+            if len(spoken.split()) != len(beat.narration.split()):
+                narration = voiceover.Narration(path=narration.path, word_starts=None)
+        narrations.append(narration)
+    return narrations
+
+
+def _story_schedule(
+    config: Config, narrations: list[voiceover.Narration]
+) -> tuple[list[float], list[float], list[float]]:
+    """Each beat lasts its narration plus a short pad. Returns (durations, offsets, narration lengths)."""
+    pad = config.stories.beat_pad_sec if config.stories else 0.5
+    lengths = [voiceover.narration_duration_sec(n.path) for n in narrations]
+    durations = [max(2.5, length + pad) for length in lengths]
+    offsets, cursor = [], 0.0
+    for duration in durations:
+        offsets.append(cursor)
+        cursor += duration
+    return durations, offsets, lengths
+
+
+def _render_beat_media(config: Config, plan: episode.EpisodePlan, story: stories.Story) -> list[_QuoteMedia]:
+    """Image, caption layers and a flat still per beat. The caption's byline is the story's name."""
+    image_backends = imagegen.default_backends(config)
+    karaoke = config.motion is None or config.motion.caption_mode == "karaoke"
+    layers_dir = config.run.frames_dir / "layers"
+    media = []
+    for i, beat in enumerate(story.script.beats):
+        image_result = imagegen.generate_image(
+            f"{story.topic.name}: {beat.narration}", i, config, config.run.images_dir,
+            backends=image_backends, visual_scene=beat.visual_scene, style=plan.pack.image_style,
+        )
+        layers = compositor.render_text_layers(
+            beat.narration, story.topic.name, plan.pack, config.compositor,
+            config.run.width, config.run.height, layers_dir, i, karaoke=karaoke,
+        )
+        frame = config.run.frames_dir / f"frame_{i + 1}.png"
+        compositor.flatten_frame(image_result.path, layers, config.run.width, config.run.height, frame)
+        media.append(_QuoteMedia(background=image_result.path, layers=layers, frame=frame))
+    return media
+
+
+def run_story_pipeline(  # pylint: disable=too-many-locals,too-many-arguments
+    config: Config,
+    chat_client,
+    now: Callable[[], datetime] | None = None,
+    elevenlabs_api_key: str | None = None,
+    rng: random.Random | None = None,
+    transcriber: listenback.Transcriber | None = None,
+) -> RunResult:
+    """Story -> narration (listened back) -> images -> music -> video -> publish, once."""
+    if config.stories is None:
+        raise stories.StoryGenerationError("stories config missing")
+    now = now or datetime.now
+    rng = rng or random.Random()  # nosec B311 - creative variety, not security-sensitive
+    setup_directories(config)
+
+    plan = dataclasses.replace(episode.plan_episode(config, rng), format_name="story")
+    story = stories.generate_story(chat_client, config.stories, rng=rng)
+    audit_path = stories.save_audit(config.stories.audit_dir, story, now())
+    logger.info("Story: %s (audit %s)", story.script.title, audit_path)
+
+    voice_id = config.stories.voice_id or plan.pack.voice_id
+    narrations = narrate_story(config, story, elevenlabs_api_key, transcriber, voice_id=voice_id)
+    durations, offsets, lengths = _story_schedule(config, narrations)
+    total = offsets[-1] + durations[-1]
+    if total > 59.5:
+        logger.warning("Story runs %.1f s, over the one-minute target", total)
+
+    media = _render_beat_media(config, plan, story)
+    music_path = config.run.output_dir / "_music.mp3"
+    music_result = musicgen.generate_music(
+        config, music_path, api_key=elevenlabs_api_key, duration_sec=total,
+        mood_anchor=plan.pack.music_mood_anchor, mood_pool=plan.pack.music_mood_pool,
+    )
+    audio_path = _build_final_audio_track(config, music_result.path, list(narrations), list(lengths), offsets)
+
+    output_path = config.run.output_dir / f"story_{now():%Y%m%d_%H%M%S}.mp4"
+    video_path = _assemble(
+        config, plan, media, list(narrations), list(lengths), durations, audio_path, output_path, rng
+    )
+
+    youtube_video_id: str | None = None
+    if config.publish.youtube_upload and music_result.backend_used == "curated_file" and not (
+        config.music.allow_curated_upload
+    ):
+        logger.error("Music fell back to a curated track (Content ID risk); skipped upload of %s", video_path)
+        notify_failure(f"Story upload skipped: curated music. Video kept at {video_path}")
+    elif config.publish.youtube_upload:
+        try:
+            youtube_video_id = publish.publish(
+                video_path, story.script.title, story.description(), stories.story_tags(story), config.publish
+            )
+        except PublishError:
+            logger.error("YouTube upload failed; story video kept at %s", video_path, exc_info=True)
+
+    catalog.append_entry(
+        config.run.video_catalog_path,
+        catalog.build_catalog_entry(
+            video_path, [], youtube_video_id, now(), music_backend=music_result.backend_used,
+            style_pack=plan.pack.name, episode_format="story", headline=story.script.title,
+            topic=story.topic.name,
+        ),
+    )
+    stories.record_story(config.stories.history_path, story, now(), youtube_video_id)
+    if config.episodes is not None:
+        episode.record_episode(config.episodes.history_path, plan, now())
+    _archive_completed_video(config, video_path)
+    return RunResult(video_path=video_path, quote_count=0, youtube_video_id=youtube_video_id)
+
+
 def main_unattended(
     config: Config,
     chat_client,
     force: bool = False,
     quote_count: int | None = None,
     elevenlabs_api_key: str | None = None,
+    video_format: str | None = None,
 ) -> int:
     """Entry point for the launchd job: cadence guard + failure notification.
+
+    ``video_format`` forces "story" or "quotes"; by default stories run on stories.days. A story that
+    can't be researched, fact-checked or pronounced correctly falls back to a quote Short.
 
     Returns a process exit code (0 success/skip, 1 unrecoverable failure)
     instead of calling sys.exit() itself, so it stays testable.
@@ -451,10 +635,21 @@ def main_unattended(
         )
         return 0
 
+    want_story = video_format == "story" or (video_format is None and is_story_day(config, datetime.now()))
     try:
-        result = run_pipeline(
-            config, chat_client, quote_count=quote_count, elevenlabs_api_key=elevenlabs_api_key
-        )
+        result = None
+        if want_story:
+            try:
+                result = run_story_pipeline(
+                    config, chat_client, elevenlabs_api_key=elevenlabs_api_key,
+                    transcriber=listenback.openai_transcriber(chat_client),
+                )
+            except stories.StoryGenerationError as exc:
+                logger.warning("Story failed (%s); making a quote Short instead", exc)
+        if result is None:
+            result = run_pipeline(
+                config, chat_client, quote_count=quote_count, elevenlabs_api_key=elevenlabs_api_key
+            )
     except HorrorVibesError as exc:
         logger.error("Run failed: %s", exc, exc_info=True)
         notify_failure(f"horrorvibes run failed: {exc}")
