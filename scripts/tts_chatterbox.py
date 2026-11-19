@@ -18,6 +18,8 @@ results.json is a list aligned with ``items``: ``{"ok": true, "word_starts": [0.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -38,6 +40,10 @@ def _word_starts(path: Path, text: str) -> list[float] | None:
 
 def main() -> int:
     """Synthesize every item in the job and write the results file."""
+    # Whisper reads audio through ffmpeg; a bare launchd or ssh PATH may not include Homebrew.
+    if shutil.which("ffmpeg") is None:
+        extra = ["/opt/homebrew/bin", "/usr/local/bin"]
+        os.environ["PATH"] = os.pathsep.join(extra + [os.environ.get("PATH", "")])
     job = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     import soundfile as sf  # pylint: disable=import-outside-toplevel,import-error
     from chatterbox.tts import ChatterboxTTS  # pylint: disable=import-outside-toplevel,import-error
