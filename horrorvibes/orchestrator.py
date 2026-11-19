@@ -532,7 +532,11 @@ def _render_beat_media(config: Config, plan: episode.EpisodePlan, story: stories
     for i, beat in enumerate(story.script.beats):
         image_result = imagegen.generate_image(
             f"{story.topic.name}: {beat.narration}", i, config, config.run.images_dir,
-            backends=image_backends, visual_scene=beat.visual_scene, style=plan.pack.image_style,
+            backends=image_backends, style=plan.pack.image_style,
+            visual_scene=(
+                f"{beat.visual_scene} Set in {story.topic.era}, {story.topic.place}: every ship, building, "
+                "vehicle, light and object is accurate to that period, nothing modern."
+            ),
         )
         layers = compositor.render_text_layers(
             beat.narration, story.topic.name, plan.pack, config.compositor,

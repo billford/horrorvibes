@@ -295,12 +295,26 @@ def is_off_limits(*texts: str) -> bool:
     return any(_OFF_LIMITS.search(text) or has_strong_profanity(text) for text in texts)
 
 
+# Sites anyone can post to. They can be listed, but don't count toward stories.min_sources.
+_WEAK_SOURCE = re.compile(
+    r"(^|\.)(forum\w*|reddit|quora|fandom|wikia|blogspot|wordpress|squarespace|wix\w*|medium|substack|"
+    r"tumblr|youtube|youtu|tiktok|facebook|instagram|x|twitter|pinterest)\.|^forum\.|/forums?/",
+)
+
+
+def is_weak_source(url: str) -> bool:
+    """True for forums, blogs, wikis, social and video sites."""
+    parsed = urlparse(url)
+    return bool(_WEAK_SOURCE.search(parsed.netloc.lower() + "." + parsed.path.lower()))
+
+
 def source_domains(sources: list[dict]) -> set[str]:
-    """Distinct websites among the sources (``www.`` ignored)."""
+    """Distinct websites among the sources that are not forums, blogs or social sites (``www.`` ignored)."""
     domains = set()
     for src in sources:
-        host = urlparse(str(src.get("url", ""))).netloc.lower()
-        if host:
+        url = str(src.get("url", ""))
+        host = urlparse(url).netloc.lower()
+        if host and not is_weak_source(url):
             domains.add(host.removeprefix("www."))
     return domains
 
@@ -379,7 +393,8 @@ def build_research_request(cfg: StoriesConfig, topic: Topic) -> QuoteRequest:
     instructions = (
         "You research a story for a short documentary narration. Use web search. Prefer primary "
         "records, newspapers, museums, government or academic sources, and well-sourced references "
-        "over blogs and video sites. Separate what people claim (the legend) from what the records "
+        "over blogs and video sites; at least two sources must be from outside forums, blogs, wikis and "
+        "social or video sites. Separate what people claim (the legend) from what the records "
         "show. Every fact must name the URL it came from. For every unusual proper noun a narrator "
         "could mispronounce (people, places, ships, creatures; skip common words like Britain or "
         "BBC), give an easy respelling for pronunciation (e.g. "
@@ -401,7 +416,8 @@ def build_script_request(
         "actually shows, then a quiet, eerie closing line. Present claims as claims ('the story "
         "goes', 'witnesses said', 'believers point to'), never as fact, and never as mockery. "
         f"Total length {cfg.words_min}-{cfg.words_max} words, split into {cfg.beats_min}-{cfg.beats_max} "
-        f"beats of at most {cfg.beat_words_max - 2} words each. Each beat gets: narration; a visual_scene for one image (the real place, era, objects "
+        f"beats of at most {cfg.beat_words_max - 2} words each. "
+        "Each beat gets: narration; a visual_scene for one image (the real place, era, objects "
         "and weather; people only as silhouettes or from behind; no real faces, logos, text, borders "
         "or gore); and a delivery tag.\n"
         "Write it as a story told aloud at night, not a report: short sentences, concrete sensory "

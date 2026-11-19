@@ -157,3 +157,28 @@ def test_config_defaults_weight_ships_highest(tmp_path):
     assert "ship" in top
     assert config.stories.enabled is False
     assert config.stories.model == config.quotes.model
+
+
+@pytest.mark.parametrize(
+    "url,weak",
+    [
+        ("https://forum.pages14-18.com/viewtopic.php?t=1", True),
+        ("https://arugula-pear-f8ed.squarespace.com/zebrina", True),
+        ("https://www.reddit.com/r/x", True),
+        ("https://example.org/forums/thread", True),
+        ("https://www.nationalarchives.gov.uk/x", False),
+        ("https://uboat.net/wwi/ships_hit/", False),
+        ("https://www.odt.co.nz/news", False),
+    ],
+)
+def test_weak_sources(url, weak):
+    assert stories.is_weak_source(url) is weak
+
+
+def test_weak_sources_do_not_count_toward_the_minimum():
+    sources = [
+        {"url": "https://forum.a.com/1"},
+        {"url": "https://b.squarespace.com"},
+        {"url": "https://uboat.net/x"},
+    ]
+    assert stories.source_domains(sources) == {"uboat.net"}
