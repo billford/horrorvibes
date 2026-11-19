@@ -519,8 +519,8 @@ def script_problems(cfg: StoriesConfig, script: Script) -> list[str]:
         problems.append("no title")
     if not cfg.beats_min <= len(script.beats) <= cfg.beats_max:
         problems.append(f"{len(script.beats)} beats")
-    # 15% slack either way: the model counts words loosely, and a few words don't change the length much.
-    if not cfg.words_min * 0.85 <= script.word_count <= cfg.words_max * 1.15:
+    # Slack below (the model counts loosely), but almost none above: past a minute, views drop sharply.
+    if not cfg.words_min * 0.85 <= script.word_count <= cfg.words_max * 1.05:
         problems.append(f"{script.word_count} words")
     longest = max((len(beat.narration.split()) for beat in script.beats), default=0)
     if longest > cfg.beat_words_max:
