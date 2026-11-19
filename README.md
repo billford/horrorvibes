@@ -47,8 +47,10 @@ inference, no real uploads run in CI).
 
 - Python 3.11+
 - FFmpeg (for video assembly) -- install separately, see `INSTALL.md`
-- An OpenAI API key (quote generation, and the image-fallback path)
-- An ElevenLabs API key, if using `music.backend: elevenlabs` (see **Music generation** below for costs)
+- An OpenAI API key (quotes, story research and fact-checking, narration listen-back, and the image-fallback
+  path)
+- An ElevenLabs API key for narration, and for `music.backend: elevenlabs` (see **Music generation** below for
+  costs)
 - ~64GB RAM recommended for local SDXL-class image generation and/or local Stable Audio Open music generation
   (developed against an M1 Ultra Mac Studio); lighter hardware can fall back to the `openai`/`gradient` image
   backends and the `elevenlabs`/`curated_file` music backends instead
@@ -70,8 +72,11 @@ python3 run.py                # full pipeline, uploads to YouTube if publish.you
 
 - `--config PATH`: use a config file other than `./config.yaml`
 - `--quotes N`: override `run.quote_count` for this invocation
-- `--dry-run`: run the full pipeline but never upload to YouTube
+- `--dry-run`: run the full pipeline but never upload to YouTube or update the run schedule
 - `--force`: ignore the cadence guard and run now
+- `--format story|quotes`: make this kind of video regardless of the weekday schedule
+- `--privacy private|unlisted|public`: override `publish.privacy_status` for this upload, e.g. an unlisted
+  review copy
 
 Everything else (image/music backends, prompts, fonts, privacy status, logging, cadence) lives in
 `config.yaml` -- see `config.sample.yaml` for the full annotated list of settings.
@@ -126,6 +131,49 @@ supplies the video's headline. Quote count varies between `episodes.quote_count_
 `episodes.quote_count_max` (4-5 by default, so each video stays a Short under a minute). Packs and formats are recorded in
 `episodes.history_path`, and in `video_catalog.jsonl` (`style_pack`, `episode_format`, `headline`), so
 you can see which looks perform best.
+
+## Story Shorts
+
+On the weekdays in `stories.days` (Monday and Thursday-Sunday by default, once `stories.enabled: true`), a
+run makes a **story Short** instead of a quote Short: one real, named legend, mystery or documented
+incident, told in under a minute. The channel analytics behind this choice are in
+`docs/reports/2026-11-19-channel-analytics.md`, and the design is in `docs/specs/story-shorts.md`.
+
+Each story goes through these steps (`horrorvibes/stories.py`):
+
+1. **Topic.** A weighted category is picked (ships and the sea first) and the model proposes candidates.
+   Anything already in `story_history.jsonl` or already on the channel (the titles in
+   `channel_analytics.json`) is skipped, as are elections, vaccines, ongoing tragedies and theories that
+   target groups.
+2. **Research.** A web-search call gathers facts with their source URLs, the legend versus the record, and
+   a respelling for every unusual name. At least `stories.min_sources` sources must come from outside
+   forums, blogs, wikis and social or video sites.
+3. **Script.** Written only from the research: a short spoken intro, a hook, the legend told as a claim,
+   what the record shows, and a quiet closing line, in 4-6 beats.
+4. **Claim check.** A separate web-search call checks every factual claim. Anything wrong or unsupported
+   gets one rewrite; if it fails again, the topic is dropped.
+5. **Listen-back.** Each beat's narration is transcribed and its unusual names compared by sound. A missed
+   name is respelled for the voice (captions keep the real spelling) up to twice. If it still fails, the
+   story is dropped.
+
+If a story can't pass, that day falls back to a quote Short. Every story's research, sources and checked
+claims are saved under `stories/` for review, and the upload's description lists the sources.
+
+## What runs where
+
+| Step | Where it runs |
+|---|---|
+| Images (FLUX.2 Klein via mflux) | Locally |
+| Music (Stable Audio Open) | Locally, by default |
+| Video, captions, motion, audio mixing | Locally (ffmpeg) |
+| Quotes, story research, scripts, fact-checks | OpenAI API, with web search |
+| Narration | ElevenLabs API |
+| Narration listen-back (Whisper) | OpenAI API |
+| Upload and channel analytics | YouTube APIs |
+
+A story Short costs roughly $0.10-0.25 in OpenAI calls and 1,500-3,000 ElevenLabs credits; images and music
+cost nothing. `scripts/channel_analytics.py` pulls every upload's watch metrics into `channel_analytics.json`
+(it needs the `yt-analytics.readonly` scope granted by `scripts/authorize_youtube.py`).
 
 ## Motion and captions
 
