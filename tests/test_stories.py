@@ -205,3 +205,11 @@ def test_description_links_the_source_code():
     )
     assert "https://github.com/x/y" in story.description("https://github.com/x/y")
     assert "github" not in story.description()
+
+
+def test_a_rejected_draft_is_told_why(cfg):
+    client = FakeClient([
+        _topics("The Octavius"), _research(), _script(words=60), _script(), _claims("supported"),
+    ])
+    stories.generate_story(client, cfg, rng=random.Random(1), used=[])
+    assert "was rejected (60 words)" in client.calls[3]["input"]

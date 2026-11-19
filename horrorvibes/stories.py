@@ -420,9 +420,13 @@ def build_research_request(cfg: StoriesConfig, topic: Topic) -> QuoteRequest:
 
 
 def build_script_request(
-    cfg: StoriesConfig, topic: Topic, research: Research, corrections: list[dict] | None = None
+    cfg: StoriesConfig,
+    topic: Topic,
+    research: Research,
+    corrections: list[dict] | None = None,
+    problems: list[str] | None = None,
 ) -> QuoteRequest:
-    """Write the narration from the research brief only, optionally fixing failed claims."""
+    """Write the narration from the research brief only, optionally fixing failed claims or shape problems."""
     instructions = (
         "You write narration for a YouTube Short about a real legend or mystery. Use ONLY the facts "
         "in the research brief; add nothing that is not in it. Structure: a gripping first sentence "
@@ -458,6 +462,12 @@ def build_script_request(
         "Facts:",
         *[f"- {fact['fact']}" for fact in research.facts],
     ]
+    if problems:
+        lines += [
+            "",
+            f"Your last draft was rejected ({', '.join(problems)}). The narration, intro included, must be "
+            f"{cfg.words_min}-{cfg.words_max} words in {cfg.beats_min}-{cfg.beats_max} beats.",
+        ]
     if corrections:
         lines += ["", "A fact-check failed these claims in your last draft. Fix or remove each one:"]
         lines += [f"- {c['claim']} -> {c['status']}: {c.get('correction', '')}" for c in corrections]
@@ -563,8 +573,10 @@ def script_problems(cfg: StoriesConfig, script: Script) -> list[str]:
 def _write_and_check(client: ResponsesClient, cfg: StoriesConfig, topic: Topic, research: Research):
     """Write, check, and rewrite once. Returns (script, claims) or None if it never passed."""
     corrections: list[dict] | None = None
+    problems: list[str] = []
     for attempt in (1, 2):
-        script = parse_script(_call(client, build_script_request(cfg, topic, research, corrections)))
+        request = build_script_request(cfg, topic, research, corrections, problems)
+        script = parse_script(_call(client, request))
         problems = script_problems(cfg, script)
         if problems:
             logger.info("Script for %s rejected (attempt %d): %s", topic.name, attempt, ", ".join(problems))

@@ -124,14 +124,14 @@ def _story_from_audit(data: dict) -> stories.Story:
 # ---- writing ---------------------------------------------------------------------------------------------
 
 
-def run_writing(cfg, audits: list[Path]) -> None:
+def run_writing(cfg, audits: list[Path], writers: tuple[str, ...] = ("cloud", "local")) -> None:
     """Every saved research brief, written by cloud and by local, checked by the same cloud checker."""
     cloud = OpenAI()
     local = _LocalWriter(LOCAL_LLM)
     results = []
     for path in audits:
         topic, research, _ = _load_audit(path)
-        for writer in ("cloud", "local"):
+        for writer in writers:
             log: list = []
             client = RouterClient(cloud, local if writer == "local" else None, log)
             started = time.time()
@@ -153,7 +153,8 @@ def run_writing(cfg, audits: list[Path]) -> None:
             print(json.dumps({k: v for k, v in result.items() if k not in ("script", "drafts_raw")}))
             results.append(result)
     OUT.mkdir(exist_ok=True)
-    (OUT / "writing.json").write_text(json.dumps(results, indent=1), encoding="utf-8")
+    out = OUT / ("writing.json" if len(writers) > 1 else f"writing_{writers[0]}.json")
+    out.write_text(json.dumps(results, indent=1), encoding="utf-8")
     print(f"local model generation time: {local.seconds:.0f} s")
 
 
@@ -321,6 +322,7 @@ def main() -> int:
     )
     parser.add_argument("mode", choices=["writing", "voice"])
     parser.add_argument("--no-upload", action="store_true", help="voice mode: render but don't upload")
+    parser.add_argument("--writer", choices=["cloud", "local"], help="writing mode: run only this writer")
     args = parser.parse_args()
     load_dotenv(".env")
     config = load_config("config.yaml")
@@ -337,7 +339,8 @@ def main() -> int:
     for directory in (config.run.output_dir, config.run.images_dir, config.run.frames_dir):
         directory.mkdir(parents=True, exist_ok=True)
     if args.mode == "writing":
-        run_writing(config.stories, sorted(Path("stories").glob("*.json")))
+        writers = (args.writer,) if args.writer else ("cloud", "local")
+        run_writing(config.stories, sorted(Path("stories").glob("*.json")), writers)
     else:
         run_voice(config, upload=not args.no_upload)
     return 0
