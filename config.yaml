@@ -242,3 +242,9 @@ automation:
   # while letting a manual afternoon run be followed by the next morning's run.
   min_hours_between_runs: 12
   state_file: ./logs/last_run.json
+
+# Story Shorts (docs/specs/story-shorts.md): one researched, fact-checked legend per video on these
+# weekdays; quote Shorts on the rest. Switched on 2026-11-19 after three unlisted review uploads.
+stories:
+  enabled: true
+  days: [mon, thu, fri, sat, sun]
