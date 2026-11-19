@@ -65,7 +65,14 @@ def build_video_title(quotes: list[str], max_movies: int = 3, headline: str | No
     return base  # naming even one movie didn't fit -- fall back to the base title alone
 
 
-def build_video_description(quotes: list[str], headline: str | None = None) -> str:
+def source_line(source_url: str | None) -> str | None:
+    """The 'how this was made' line, linking the open-source generator."""
+    return f"Made with horrorvibes, open source and free to reuse: {source_url}" if source_url else None
+
+
+def build_video_description(
+    quotes: list[str], headline: str | None = None, source_url: str | None = None
+) -> str:
     """Lists every quote and its film -- an actually useful, searchable
     description instead of generic boilerplate -- plus hashtags."""
     intro = (
@@ -80,5 +87,7 @@ def build_video_description(quotes: list[str], headline: str | None = None) -> s
     lines.append("")
     lines.append("Which one's your favorite? Let us know in the comments.")
     lines.append("")
+    if source_url:
+        lines += [source_line(source_url) or "", ""]
     lines.append(" ".join(f"#{tag}" for tag in build_video_hashtags(quotes)))
     return "\n".join(lines)

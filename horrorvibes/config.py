@@ -162,6 +162,8 @@ DEFAULTS: dict[str, Any] = {
         "token_path": "./token.json",  # nosec B105 - a file path default, not a credential value
         # YouTube's altered/synthetic media disclosure: images, music and narration are AI-generated.
         "contains_synthetic_media": True,
+        # Shown in every description so viewers can see (and reuse) how the video was made. null = omit.
+        "source_url": "https://github.com/billford/horrorvibes",
     },
     "voiceover": {
         "enabled": False,
@@ -502,6 +504,7 @@ class PublishConfig:
     client_secrets_path: Path
     token_path: Path
     contains_synthetic_media: bool = True
+    source_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -960,6 +963,7 @@ def load_config(path: str | Path) -> Config:
             client_secrets_path=Path(merged["publish"]["client_secrets_path"]),
             token_path=Path(merged["publish"]["token_path"]),
             contains_synthetic_media=bool(merged["publish"]["contains_synthetic_media"]),
+            source_url=merged["publish"]["source_url"] or None,
         ),
         voiceover=VoiceoverConfig(
             enabled=bool(merged["voiceover"]["enabled"]),

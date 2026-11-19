@@ -74,3 +74,8 @@ def test_title_and_description_use_episode_headline():
     title = build_video_title(quotes, headline="Folk Horror Night: 2 Quotes")
     assert title.startswith("Folk Horror Night: 2 Quotes | Halloween")
     assert build_video_description(quotes, headline="Folk Horror Night").startswith("Folk Horror Night.")
+
+
+def test_build_video_description_links_the_source_when_set():
+    assert "https://github.com/x/y" in build_video_description(QUOTES, source_url="https://github.com/x/y")
+    assert "github" not in build_video_description(QUOTES)

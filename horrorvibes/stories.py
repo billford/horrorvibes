@@ -125,6 +125,16 @@ SCRIPT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "title": _STR,
+        "intro": {
+            "type": "object",
+            "properties": {
+                "narration": _STR,
+                "visual_scene": _STR,
+                "delivery": {"type": "string", "enum": list(DELIVERY_TAGS)},
+            },
+            "required": ["narration", "visual_scene", "delivery"],
+            "additionalProperties": False,
+        },
         "beats": {
             "type": "array",
             "items": {
@@ -139,7 +149,7 @@ SCRIPT_SCHEMA: dict[str, Any] = {
             },
         },
     },
-    "required": ["title", "beats"],
+    "required": ["title", "intro", "beats"],
     "additionalProperties": False,
 }
 
@@ -197,6 +207,7 @@ class Beat:
     narration: str
     visual_scene: str
     delivery: str
+    intro: bool = False
 
 
 @dataclass(frozen=True)
@@ -226,11 +237,13 @@ class Story:
     script: Script
     claims: list[dict] = field(default_factory=list)
 
-    def description(self) -> str:
-        """YouTube description: a one-line summary, the sources, and an AI disclosure."""
+    def description(self, source_url: str | None = None) -> str:
+        """YouTube description: a one-line summary, the sources, an AI disclosure and the source link."""
         lines = [self.topic.pitch, "", "Sources:"]
         lines += [f"- {src['title']}: {src['url']}" for src in self.research.sources]
         lines += ["", "Narration and images are AI-generated; facts are checked against the sources above."]
+        if source_url:
+            lines.append(f"Made with horrorvibes, open source and free to reuse: {source_url}")
         lines += ["", " ".join(f"#{tag}" for tag in story_tags(self)[:5])]
         return "\n".join(lines)
 
@@ -421,6 +434,11 @@ def build_script_request(
         "inland or coastal, town or countryside -- with the beat's own era, objects "
         "and weather; people only as silhouettes or from behind; no real faces, logos, text, borders "
         "or gore); and a delivery tag.\n"
+        "Also write an intro: one short spoken line (5-10 words) that opens the video by naming the "
+        "story and its place, like a narrator setting the scene, e.g. 'This is the screaming skull of "
+        "Bettiscombe Manor.' or 'Off the coast of Alaska, a ship would not die.' Its visual_scene is an "
+        "establishing shot of the place. The intro counts toward the total word length; the beats "
+        "follow it and the first beat is still the hook.\n"
         "Write it as a story told aloud at night, not a report: short sentences, concrete sensory "
         "detail from the facts, at most two numbers or dates in the whole script, and never mention "
         "articles, sources, researchers' caveats or 'records' in a bureaucratic way -- the "
@@ -499,16 +517,19 @@ def parse_research(payload: dict) -> Research | None:
     )
 
 
+def _beat(item: Any, intro: bool = False) -> Beat:
+    item = item if isinstance(item, dict) else {}
+    return Beat(
+        narration=str(item.get("narration", "")).strip(),
+        visual_scene=str(item.get("visual_scene", "")).strip(),
+        delivery=str(item.get("delivery", "")).strip(),
+        intro=intro,
+    )
+
+
 def parse_script(payload: dict) -> Script:
-    """The written script."""
-    beats = [
-        Beat(
-            narration=str(beat.get("narration", "")).strip(),
-            visual_scene=str(beat.get("visual_scene", "")).strip(),
-            delivery=str(beat.get("delivery", "")).strip(),
-        )
-        for beat in payload.get("beats", [])
-    ]
+    """The written script; the intro, when given, becomes the first beat."""
+    beats = [_beat(payload.get("intro"), intro=True)] + [_beat(beat) for beat in payload.get("beats", [])]
     return Script(title=str(payload.get("title", "")).strip(), beats=[b for b in beats if b.narration])
 
 
@@ -517,8 +538,11 @@ def script_problems(cfg: StoriesConfig, script: Script) -> list[str]:
     problems = []
     if not script.title:
         problems.append("no title")
-    if not cfg.beats_min <= len(script.beats) <= cfg.beats_max:
-        problems.append(f"{len(script.beats)} beats")
+    body = [beat for beat in script.beats if not beat.intro]
+    if not cfg.beats_min <= len(body) <= cfg.beats_max:
+        problems.append(f"{len(body)} beats")
+    if len(body) == len(script.beats):
+        problems.append("no intro")
     # Slack below (the model counts loosely), but almost none above: past a minute, views drop sharply.
     if not cfg.words_min * 0.85 <= script.word_count <= cfg.words_max * 1.05:
         problems.append(f"{script.word_count} words")

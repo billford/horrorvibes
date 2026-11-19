@@ -418,7 +418,9 @@ def run_pipeline(  # pylint: disable=too-many-locals,too-many-arguments
             youtube_video_id = publish.publish(
                 video_path,
                 metadata.build_video_title(generated_quotes, headline=headline),
-                metadata.build_video_description(generated_quotes, headline=headline),
+                metadata.build_video_description(
+                    generated_quotes, headline=headline, source_url=config.publish.source_url
+                ),
                 metadata.build_video_hashtags(generated_quotes),
                 config.publish,
             )
@@ -612,7 +614,8 @@ def run_story_pipeline(  # pylint: disable=too-many-locals,too-many-arguments
     elif config.publish.youtube_upload:
         try:
             youtube_video_id = publish.publish(
-                video_path, story.script.title, story.description(), stories.story_tags(story), config.publish
+                video_path, story.script.title, story.description(config.publish.source_url),
+                stories.story_tags(story), config.publish,
             )
         except PublishError:
             logger.error("YouTube upload failed; story video kept at %s", video_path, exc_info=True)

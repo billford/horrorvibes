@@ -196,6 +196,8 @@ publish:
   token_path: ./token.json
   # Tick YouTube's altered/synthetic media disclosure (images, music and narration are AI-generated).
   contains_synthetic_media: true
+  # Linked in every description so viewers can see (and reuse) how videos are made. null = omit.
+  source_url: https://github.com/billford/horrorvibes
 
 # Animated assembly: Ken Burns zoom per quote, style-pack colour grade and
 # film texture, xfade transitions, and word-synced captions. If rendering

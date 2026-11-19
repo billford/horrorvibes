@@ -51,9 +51,10 @@ def _research(urls=("https://a.org/1", "https://www.b.com/2")):
 
 
 def _script(words=12, title="The Octavius: Ghost Ship of the Arctic"):
-    half = " ".join(["word"] * (words // 2))
+    half = " ".join(["word"] * ((words - 4) // 2))
     beat = {"narration": half, "visual_scene": "ice", "delivery": "calm"}
-    return {"title": title, "beats": [beat, beat]}
+    intro = {"narration": "This is the Octavius.", "visual_scene": "arctic", "delivery": "whispers"}
+    return {"title": title, "intro": intro, "beats": [beat, beat]}
 
 
 def _claims(*statuses):
@@ -182,3 +183,25 @@ def test_weak_sources_do_not_count_toward_the_minimum():
         {"url": "https://uboat.net/x"},
     ]
     assert stories.source_domains(sources) == {"uboat.net"}
+
+
+def test_intro_becomes_the_first_beat():
+    script = stories.parse_script(_script())
+    assert script.beats[0].intro and script.beats[0].narration == "This is the Octavius."
+    assert not any(beat.intro for beat in script.beats[1:])
+
+
+def test_missing_intro_is_a_problem():
+    cfg = SimpleNamespace(words_min=10, words_max=20, beats_min=2, beats_max=3, beat_words_max=32)
+    payload = {**_script(), "intro": {"narration": "", "visual_scene": "", "delivery": "calm"}}
+    assert "no intro" in stories.script_problems(cfg, stories.parse_script(payload))
+
+
+def test_description_links_the_source_code():
+    story = stories.Story(
+        topic=stories.Topic("The Octavius", "Arctic", "1775", "A ghost ship.", "ships"),
+        research=stories.Research("L", "R", [], [], [{"title": "S", "url": "https://a.org"}]),
+        script=stories.parse_script(_script()),
+    )
+    assert "https://github.com/x/y" in story.description("https://github.com/x/y")
+    assert "github" not in story.description()
