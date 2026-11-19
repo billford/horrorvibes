@@ -1,6 +1,6 @@
 # Story Shorts
 
-Status: draft for review, 2026-11-19.
+Status: approved with changes, 2026-11-19. The user's answers are recorded under "Decisions".
 
 ## Why
 
@@ -37,15 +37,22 @@ pick topic -> research (web search) -> write script -> check every claim
 
 ### 1. Pick the topic
 
-- The model proposes 8 candidates, guided by a weighted category list drawn from the analytics: cursed
-  objects, mystery lights, ships and the sea, cryptids, haunted places, and specific incidents.
+- The model proposes 8 candidates, guided by a weighted category list drawn from the analytics. Ships and
+  the sea (ghost ships, warships, wrecks) get the heaviest starting weight: they are the channel's most
+  reliable topic, with 17 videos mostly at 650-1,600 views plus *Baychimo* at 62k. The other categories
+  are cursed objects, mystery lights, cryptids, haunted places and specific incidents.
   Categories are re-weighted from the weekly analytics pull once there is enough data, and every category
   keeps a minimum share for exploration.
 - Rejected candidates:
   - anything in a new `story_history.jsonl` (never repeat a topic)
-  - anything the channel has already covered (matched against the titles of past uploads)
+  - anything the channel has already covered (matched against the titles of past uploads), except
+    planned remakes (see below)
   - anything that fails the content rules below
 - One candidate is picked at random, weighted by category.
+- **Remakes.** About one story a week remakes a past hit, chosen from the top uploads by views and % watched
+  that are at least 6 months old. *Baychimo*, *Chir-Batti*, *Robert the Doll*, *Ogopogo* and *Hashima* come
+  first. A remake is a new, deeper telling with fresh research, not a re-upload. Its title must differ
+  from the original so the two don't compete in search. Each past hit is remade at most once a year.
 
 ### 2. Research
 
@@ -84,6 +91,19 @@ The quote verifier's approach, made stricter:
   - "Alias" rules (replace a word with a sound-it-out spelling) are the safe default.
   - Whether `eleven_v3` honours IPA "phoneme" rules needs to be confirmed during build. If it doesn't,
     aliases are used throughout.
+
+### Voice
+
+The user's best-performing videos used their own cloned voice. Story Shorts default to a new ElevenLabs
+clone of the user's voice; quote Shorts keep the per-pack voices.
+
+- **Instant Voice Clone.** About 1-3 minutes of clean audio, ready in minutes. Good enough for testing.
+- **Professional Voice Clone.** 30 minutes or more of clean audio, trained over a few hours. It sounds
+  closer to the real voice and is worth doing once the format is proven.
+- Whether `eleven_v3` and its expressive delivery tags work as well with a clone as with a library voice
+  is tested during build. If they don't, story Shorts fall back to `eleven_multilingual_v2` for the clone.
+- The voice id goes in `config.yaml` (`stories.voice_id`). The clone itself stays in the user's ElevenLabs
+  account and is never committed.
 
 ### 6. Listen back
 
@@ -124,9 +144,20 @@ The quote verifier's approach, made stricter:
 
 ## Schedule
 
-- The daily slot alternates between formats by weight. The default is story Shorts 5 of 7 days and quote
-  Shorts 2 of 7, recorded in `episode_history.jsonl`.
-- Weights move with the analytics once both formats have about 20 videos with metrics.
+| Day | Video |
+|---|---|
+| Thursday-Sunday | Story Short (the channel's busiest days, per the user) |
+| Monday | Story Short (Monday uploads have a strong median of 638 views, though from only 30 videos) |
+| Tuesday-Wednesday | Quote Short |
+
+That is 5 stories and 2 quote Shorts a week. The episode planner picks the format by weekday in lola's
+local time. The split is a config table, so it can be changed without code. The analytics pull compares
+the two formats once each has about 20 videos with metrics.
+
+**Meditation experiment.** One Thursday-Sunday slot every 2 weeks is a slow, whispered story of one
+place: still under 60 s, fewer and longer beats, softer music, and the word "meditation" kept out of the
+title. Its % watched and views are compared with regular story Shorts after 6 of them, and it is kept or
+dropped on those numbers.
 
 ## Cost per story Short (estimate)
 
@@ -146,9 +177,11 @@ The quote verifier's approach, made stricter:
 5. Format rotation in the episode planner.
 6. Three dry runs on lola. The user reviews them before the first public upload.
 
-## Open questions for the user
+## Decisions (2026-11-19)
 
-1. Is the 5:2 story-to-quote split right, or should quote Shorts become an occasional special?
-2. Should the channel remake its biggest hits as new videos (for example a deeper Baychimo story), or
-   always find new topics?
-3. Should there be a meditation variant: a slow, whispered story of one place, still under a minute?
+1. **Split.** About 5 stories to 2 quote Shorts a week, with stories on Thursday-Sunday, the busiest days.
+   Monday is also a story day to make 5.
+2. **Remakes.** Yes, remake the biggest hits.
+3. **Meditation variant.** Not as a regular format; run it as a small experiment and keep it only if the
+   numbers support it.
+4. **Voice.** The user will make a new ElevenLabs clone of their own voice for story Shorts.
