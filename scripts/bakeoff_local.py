@@ -275,17 +275,25 @@ def run_voice(config, upload: bool) -> None:
         "B_cloud_script_chatterbox": _render(config, story, scores["chatterbox"]["narrations"], images, "B")
     }
 
-    writing = (
-        json.loads((OUT / "writing.json").read_text(encoding="utf-8"))
-        if (OUT / "writing.json").exists()
-        else []
-    )
-    local = next(
-        (r for r in writing if r["writer"] == "local" and r["passed"] and "Gurdon" in r["topic"]), None
-    )
+    # Newest local-writer results first (writing_local.json from a --writer local rerun).
+    writing = [
+        row
+        for name in ("writing_local.json", "writing.json")
+        if (OUT / name).exists()
+        for row in json.loads((OUT / name).read_text(encoding="utf-8"))
+    ]
+    passed = [r for r in writing if r["writer"] == "local" and r["passed"]]
+    # Prefer the Gurdon Light, so C is directly comparable with A and B; else any passing local script.
+    local = next((r for r in passed if "Gurdon" in r["topic"]), passed[0] if passed else None)
     if local:
+        base = story
+        if "Gurdon" not in local["topic"]:
+            for path in Path("stories").glob("*.json"):
+                candidate = _story_from_audit(json.loads(path.read_text(encoding="utf-8")))
+                if candidate.topic.name == local["topic"]:
+                    base = candidate
         local_story = dataclasses.replace(
-            story,
+            base,
             script=stories.Script(
                 local["script"]["title"], [stories.Beat(**b) for b in local["script"]["beats"]]
             ),
