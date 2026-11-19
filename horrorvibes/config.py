@@ -354,7 +354,7 @@ DEFAULTS: dict[str, Any] = {
                            "/System/Library/Fonts/Supplemental/Futura.ttc"],
             "layout": "center", "text_color": [190, 225, 235], "highlight_color": [240, 255, 255],
             "scrim_opacity": 90, "stroke_width": 0,
-            "grade": "eq=saturation=1.1:contrast=1.05,colorbalance=bs=0.12:ms=0.05",
+            "grade": "eq=saturation=1.1:contrast=1.05,colorbalance=bs=0.12:rm=0.04:bm=0.06",
             "overlay": "none", "vignette": True,
             "transitions": ["circleopen", "radial", "fadewhite", "fade"],
             "music_mood_anchor": "vast cosmic horror drone, deep sub bass, no vocals, no percussion",

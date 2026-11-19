@@ -2,11 +2,14 @@
 
 import dataclasses
 import os
+import shutil
+import subprocess  # nosec B404
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from horrorvibes.config import load_config
 from horrorvibes.exceptions import VideoAssemblyError
 from horrorvibes.video import (
     ClipSpec,
@@ -243,3 +246,15 @@ def test_assemble_motion_video_raises_on_ffmpeg_failure(tmp_path):
         assemble_motion_video(
             [_clip(tmp_path)], tmp_path / "o.mp4", None, MotionStyle(), [], 1080, 1920, 30, runner
         )
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
+@pytest.mark.parametrize("pack", load_config(Path("missing.yaml")).style_packs, ids=lambda pack: pack.name)
+def test_every_default_pack_grade_is_a_valid_ffmpeg_filter(pack):
+    # A bad grade doesn't fail the run: the animated render quietly falls back to a still slideshow.
+    result = subprocess.run(
+        ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=64x64:d=0.1",
+         "-vf", pack.grade or "null", "-frames:v", "1", "-f", "null", "-"],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
