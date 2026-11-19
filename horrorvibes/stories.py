@@ -353,8 +353,9 @@ def build_research_request(cfg: StoriesConfig, topic: Topic) -> QuoteRequest:
         "You research a story for a short documentary narration. Use web search. Prefer primary "
         "records, newspapers, museums, government or academic sources, and well-sourced references "
         "over blogs and video sites. Separate what people claim (the legend) from what the records "
-        "show. Every fact must name the URL it came from. For every proper noun a narrator must say "
-        "(people, places, ships, creatures), give an easy respelling for pronunciation (e.g. "
+        "show. Every fact must name the URL it came from. For every unusual proper noun a narrator "
+        "could mispronounce (people, places, ships, creatures; skip common words like Britain or "
+        "BBC), give an easy respelling for pronunciation (e.g. "
         "'Chir-Batti: cheer BAH-tee') and IPA if a source gives it, else an empty string. "
         "Set found=false if you cannot find reliable sources for the story."
     )
@@ -375,8 +376,15 @@ def build_script_request(
         f"Total length {cfg.words_min}-{cfg.words_max} words, split into {cfg.beats_min}-{cfg.beats_max} "
         "beats. Each beat gets: narration; a visual_scene for one image (the real place, era, objects "
         "and weather; people only as silhouettes or from behind; no real faces, logos, text, borders "
-        "or gore); and a delivery tag. Title format: 'Name: what it is, where' -- no question, no "
-        "hashtags, under 70 characters.\n"
+        "or gore); and a delivery tag.\n"
+        "Write it as a story told aloud at night, not a report: short sentences, concrete sensory "
+        "detail from the facts, at most two numbers or dates in the whole script, and never mention "
+        "articles, sources, researchers' caveats or 'records' in a bureaucratic way -- the "
+        "description lists sources. Keep the uncertainty, but say it like a storyteller ('no one "
+        "has ever explained it').\n"
+        "Title: the story's searchable name, a colon, then a short evocative hook naming the place "
+        "if it fits, e.g. 'The SS Baychimo: The Ghost Ship That Wouldn't Sink' or 'Chir-Batti: The "
+        "Mysterious Desert Lights of Gujarat'. No question, no hashtags, under 70 characters.\n"
         + _CONTENT_RULES
     )
     lines = [
@@ -401,7 +409,9 @@ def build_claims_request(cfg: StoriesConfig, script: Script, research: Research)
         "legend or belief ('the story goes...') are claims about what people say -- check that "
         "people do say it. For each claim, use web search and the listed sources, and mark it "
         "supported, unsupported (no reliable source found) or wrong (a source contradicts it), with "
-        "a correction and the source URL. Be strict about dates, numbers and names."
+        "a correction and the source URL. Be strict about dates, numbers and names. Statements of "
+        "mood or open uncertainty ('it has never been explained', 'no one knows') are not claims "
+        "unless a source shows the question was in fact settled."
     )
     text = "\n".join(
         ["Narration:", script.narration, "", "Sources:"]
