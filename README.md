@@ -120,7 +120,7 @@ all six come round before any pack repeats. A pack sets:
 - narration voice
 
 The built-in packs are `expressionist_oil`, `grindhouse_poster`, `vhs_found_footage`, `woodcut_folk`,
-`cosmic_void` and `polaroid_evidence`. They live in `DEFAULTS["style_packs"]` in `horrorvibes/config.py`.
+`cosmic_void` and `polaroid_evidence`. They live in `DEFAULTS["style_packs"]` in `horrorvibes/defaults.py`.
 Defining `style_packs:` in config.yaml replaces the whole list.
 
 Each run is also an **episode**: either a mixed bag, or (`episodes.themed_share` of the time) a themed

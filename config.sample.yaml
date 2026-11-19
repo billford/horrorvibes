@@ -1,5 +1,5 @@
 # horrorvibes config. Copy to config.yaml and adjust.
-# Any key you omit falls back to the built-in default in horrorvibes/config.py.
+# Any key you omit falls back to the built-in default in horrorvibes/defaults.py.
 
 run:
   quote_count: 12
@@ -220,7 +220,7 @@ motion:
 # with 4-5 quotes, keeping it a Short under a minute (channel analytics,
 # docs/reports/2026-11-19-channel-analytics.md: past 60 s views drop sharply). When enabled this replaces run.quote_count; --quotes
 # still overrides it. Formats and headlines default to the built-in list in
-# horrorvibes/config.py -- add an `episodes.formats` list here to replace it.
+# horrorvibes/defaults.py -- add an `episodes.formats` list here to replace it.
 episodes:
   enabled: true
   history_path: ./episode_history.jsonl
@@ -230,7 +230,7 @@ episodes:
 
 # Style packs (look, font, grade, transitions, music mood, voice) rotate
 # least-recently-used per run. Six ship built in (see DEFAULTS in
-# horrorvibes/config.py): expressionist_oil, grindhouse_poster,
+# horrorvibes/defaults.py): expressionist_oil, grindhouse_poster,
 # vhs_found_footage, woodcut_folk, cosmic_void, polaroid_evidence.
 # Defining `style_packs:` here replaces that list entirely.
 
