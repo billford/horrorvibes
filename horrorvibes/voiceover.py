@@ -19,7 +19,10 @@ the per-item resilience pattern used elsewhere (imagegen, compositor).
 from __future__ import annotations
 
 import base64
+import json
 import logging
+import subprocess  # nosec B404 - argv list, no shell
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -191,7 +194,115 @@ def _attempt_plan(config: VoiceoverConfig, voice_id: str) -> list[tuple[str, str
     return plan
 
 
-def generate_narrations(  # pylint: disable=too-many-arguments,too-many-locals
+# Chatterbox has no delivery tags; its "exaggeration" (0-1) sets how dramatic the read is.
+_EXAGGERATION = {
+    "whispers": 0.3, "calm": 0.35, "tired": 0.35, "sad": 0.4, "cold": 0.45,
+    "sinister": 0.55, "menacing": 0.6, "mocking": 0.6,
+    "desperate": 0.7, "terrified": 0.75, "excited": 0.75, "crying": 0.7,
+}
+_LOCAL_WORKER = Path(__file__).resolve().parent.parent / "scripts" / "tts_chatterbox.py"
+
+
+def local_engine_ready(config: VoiceoverConfig) -> bool:
+    """True when the Chatterbox engine is selected and its venv and voice sample both exist."""
+    if config.engine != "chatterbox":
+        return False
+    missing = [
+        str(path)
+        for path in (config.local_python, config.local_reference)
+        if path is None or not Path(path).exists()
+    ]
+    if missing:
+        logger.warning("Chatterbox engine selected but missing %s; using ElevenLabs", ", ".join(missing))
+        return False
+    return True
+
+
+def build_local_job(
+    config: VoiceoverConfig, items: list[NarrationItem], output_dir: Path, results: Path
+) -> dict:
+    """The job file for scripts/tts_chatterbox.py. Pure function."""
+    return {
+        "reference": str(config.local_reference),
+        "results": str(results),
+        "cfg_weight": 0.4,
+        "items": [
+            {
+                "text": item.text,
+                "out": str(output_dir / f"narration_{i + 1}.wav"),
+                "exaggeration": _EXAGGERATION.get(item.delivery, 0.5),
+            }
+            for i, item in enumerate(items)
+        ],
+    }
+
+
+def generate_local_narrations(
+    config: VoiceoverConfig,
+    items: list[NarrationItem],
+    output_dir: Path,
+    runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> list[Narration | None]:
+    """Narrate every item with Chatterbox in one worker run (the model loads once). None where it failed."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as scratch:
+        job_path, results_path = Path(scratch) / "job.json", Path(scratch) / "results.json"
+        job = build_local_job(config, items, output_dir, results_path)
+        job_path.write_text(json.dumps(job), encoding="utf-8")
+        cmd = [str(config.local_python), str(_LOCAL_WORKER), str(job_path)]
+        try:
+            proc = runner(cmd, capture_output=True, text=True, check=False, timeout=config.local_timeout_sec)
+            results = json.loads(results_path.read_text(encoding="utf-8")) if results_path.exists() else []
+        except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+            logger.warning("Chatterbox worker failed to run", exc_info=True)
+            return [None] * len(items)
+        if proc.returncode != 0 or len(results) != len(items):
+            logger.warning("Chatterbox worker exited %s: %s", proc.returncode, (proc.stderr or "")[-500:])
+            return [None] * len(items)
+
+    narrations: list[Narration | None] = []
+    for i, (spec, result) in enumerate(zip(job["items"], results), start=1):
+        if result.get("ok") and Path(spec["out"]).exists():
+            narrations.append(Narration(path=Path(spec["out"]), word_starts=result.get("word_starts")))
+            logger.info(
+                "Narration generated for clip %d via chatterbox (word timings: %s)",
+                i, "yes" if result.get("word_starts") else "no -- will estimate",
+            )
+        else:
+            logger.warning("Chatterbox failed clip %d: %s", i, result.get("error", "no output"))
+            narrations.append(None)
+    return narrations
+
+
+def generate_narrations(  # pylint: disable=too-many-arguments
+    config: VoiceoverConfig,
+    items: list[NarrationItem],
+    output_dir: Path,
+    api_key: str | None = None,
+    backend: NarrationBackend | None = None,
+    voice_id: str | None = None,
+    runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> list[Narration | None]:
+    """One clip per item, aligned with ``items``; ``None`` where every attempt failed.
+
+    With ``engine: chatterbox`` (and its venv and voice sample present), clips are made locally and only
+    the ones Chatterbox fails on go to ElevenLabs.
+    """
+    if not local_engine_ready(config):
+        return _generate_elevenlabs(config, items, output_dir, api_key, backend, voice_id)
+    narrations = generate_local_narrations(config, items, output_dir, runner)
+    failed = [i for i, narration in enumerate(narrations) if narration is None]
+    if failed:
+        logger.warning("Falling back to ElevenLabs for %d of %d clips", len(failed), len(items))
+        retried = _generate_elevenlabs(
+            config, [items[i] for i in failed], output_dir / "elevenlabs_fallback", api_key, backend, voice_id
+        )
+        for i, narration in zip(failed, retried):
+            narrations[i] = narration
+    return narrations
+
+
+def _generate_elevenlabs(  # pylint: disable=too-many-arguments,too-many-locals
     config: VoiceoverConfig,
     items: list[NarrationItem],
     output_dir: Path,
@@ -199,7 +310,7 @@ def generate_narrations(  # pylint: disable=too-many-arguments,too-many-locals
     backend: NarrationBackend | None = None,
     voice_id: str | None = None,
 ) -> list[Narration | None]:
-    """One clip per item, aligned with ``items`` -- ``None`` where every
+    """ElevenLabs clips, aligned with ``items`` -- ``None`` where every
     attempt failed, so the caller can skip that quote's narration rather
     than fail the run. A (model, voice) pair that failed once (after its
     own retries) is not tried again for later items in this run."""

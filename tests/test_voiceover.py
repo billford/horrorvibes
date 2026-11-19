@@ -244,3 +244,105 @@ def test_narration_duration_sec_reads_real_audio_length(tmp_path):
     sf.write(path, np.zeros(44100 * 2), 44100)  # 2 seconds of silence
 
     assert narration_duration_sec(path) == pytest.approx(2.0, abs=0.01)
+
+
+# ---- local (Chatterbox) engine ---------------------------------------------------------------
+
+
+def _local_config(voiceover_config, tmp_path):
+    python = tmp_path / "python"
+    reference = tmp_path / "voice.wav"
+    python.write_text("")
+    reference.write_bytes(b"wav")
+    return dataclasses.replace(
+        voiceover_config, engine="chatterbox", local_python=python, local_reference=reference
+    )
+
+
+def _fake_worker(fail_indexes=()):
+    """Stands in for scripts/tts_chatterbox.py: writes each clip and the results file."""
+    import json  # pylint: disable=import-outside-toplevel
+    from pathlib import Path  # pylint: disable=import-outside-toplevel
+    from types import SimpleNamespace  # pylint: disable=import-outside-toplevel
+
+    calls = []
+
+    def runner(cmd, **kwargs):
+        calls.append(cmd)
+        job = json.loads(Path(cmd[-1]).read_text(encoding="utf-8"))
+        results = []
+        for i, item in enumerate(job["items"]):
+            if i in fail_indexes:
+                results.append({"ok": False, "error": "boom"})
+            else:
+                Path(item["out"]).write_bytes(b"wav")
+                results.append({"ok": True, "word_starts": [0.1, 0.5]})
+        Path(job["results"]).write_text(json.dumps(results), encoding="utf-8")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    return runner, calls
+
+
+def test_local_engine_makes_every_clip_in_one_worker_run(voiceover_config, tmp_path):
+    from horrorvibes import voiceover  # pylint: disable=import-outside-toplevel
+
+    config = _local_config(voiceover_config, tmp_path)
+    runner, calls = _fake_worker()
+    items = [
+        voiceover.NarrationItem("one two", "whispers"),
+        voiceover.NarrationItem("three four", "menacing"),
+    ]
+
+    result = voiceover.generate_narrations(config, items, tmp_path / "out", runner=runner)
+
+    assert len(calls) == 1
+    assert [n.path.name for n in result] == ["narration_1.wav", "narration_2.wav"]
+    assert result[0].word_starts == [0.1, 0.5]
+
+
+def test_local_engine_falls_back_to_elevenlabs_for_failed_clips(voiceover_config, tmp_path):
+    from horrorvibes import voiceover  # pylint: disable=import-outside-toplevel
+
+    config = _local_config(voiceover_config, tmp_path)
+    runner, _ = _fake_worker(fail_indexes={1})
+    spoken = []
+
+    def eleven(text, output_path, model_id, voice_id):  # pylint: disable=unused-argument
+        spoken.append(text)
+        output_path.write_bytes(b"mp3")
+
+    items = [voiceover.NarrationItem("one two"), voiceover.NarrationItem("three four")]
+    result = voiceover.generate_narrations(config, items, tmp_path / "out", backend=eleven, runner=runner)
+
+    assert result[0].path.suffix == ".wav"
+    assert "elevenlabs_fallback" in str(result[1].path)
+    assert spoken == ["three four"]
+
+
+def test_local_engine_without_a_voice_sample_uses_elevenlabs(voiceover_config, tmp_path):
+    from horrorvibes import voiceover  # pylint: disable=import-outside-toplevel
+
+    config = dataclasses.replace(
+        _local_config(voiceover_config, tmp_path), local_reference=tmp_path / "missing.wav"
+    )
+    assert not voiceover.local_engine_ready(config)
+
+
+def test_exaggeration_follows_delivery(voiceover_config, tmp_path):
+    from horrorvibes import voiceover  # pylint: disable=import-outside-toplevel
+
+    config = _local_config(voiceover_config, tmp_path)
+    items = [voiceover.NarrationItem("a", "whispers"), voiceover.NarrationItem("b", "terrified"),
+             voiceover.NarrationItem("c")]
+    job = voiceover.build_local_job(config, items, tmp_path, tmp_path / "r.json")
+    levels = [item["exaggeration"] for item in job["items"]]
+    assert levels[0] < levels[2] < levels[1]
+
+
+def test_unknown_voice_engine_is_rejected(tmp_path):
+    from horrorvibes.config import ConfigError  # pylint: disable=import-outside-toplevel
+
+    path = tmp_path / "config.yaml"
+    path.write_text("voiceover:\n  engine: festival\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="voiceover.engine"):
+        load_config(path)

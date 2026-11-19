@@ -490,11 +490,19 @@ def narrate_story(  # pylint: disable=too-many-arguments,too-many-locals
     """
     base_dir = config.run.output_dir / "narration"
     names = story.research.names
+    # Every beat in one call, so a local engine loads its model once; respells below go one at a time.
+    first_pass = voiceover.generate_narrations(
+        config.voiceover,
+        [voiceover.NarrationItem(text=beat.narration, delivery=beat.delivery) for beat in story.script.beats],
+        base_dir, api_key=api_key, voice_id=voice_id,
+    )
     narrations = []
     for i, beat in enumerate(story.script.beats):
         to_respell: list[dict] = []
         beat_dir = base_dir / f"beat_{i + 1}"
-        narration = _narrate_beat(config, beat.narration, beat.delivery, beat_dir, api_key, voice_id)
+        narration = first_pass[i]
+        if narration is None:
+            raise stories.StoryGenerationError(f"Narration failed for beat {i + 1}: {beat.narration[:60]}")
         for attempt in range(max_respells + 1):
             if transcriber is None:
                 break

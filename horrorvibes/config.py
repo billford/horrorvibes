@@ -31,6 +31,12 @@ VALID_TRANSITIONS = {
 VALID_MUSIC_BACKENDS = {"local", "elevenlabs", "curated_file"}
 VALID_PRIVACY_STATUSES = {"private", "unlisted", "public"}
 VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+VALID_VOICE_ENGINES = {"elevenlabs", "chatterbox"}
+
+
+def _optional_path(value: Any) -> Path | None:
+    """A user path (``~`` expanded), or None when unset."""
+    return Path(str(value)).expanduser() if value else None
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -171,6 +177,10 @@ class VoiceoverConfig:  # pylint: disable=too-many-instance-attributes
     music_lufs: float = -27.0
     use_delivery_tags: bool = True
     use_timestamps: bool = True
+    engine: str = "elevenlabs"
+    local_python: Path | None = None
+    local_reference: Path | None = None
+    local_timeout_sec: int = 1200
 
 
 @dataclass(frozen=True)
@@ -423,6 +433,9 @@ def _validate(data: dict[str, Any]) -> None:
     if float(data["music"]["local_crossfade_sec"]) >= float(data["music"]["local_segment_sec"]):
         raise ConfigError("music.local_crossfade_sec must be less than music.local_segment_sec")
 
+    if data["voiceover"]["engine"] not in VALID_VOICE_ENGINES:
+        raise ConfigError(f"voiceover.engine must be one of {sorted(VALID_VOICE_ENGINES)}")
+
     privacy_status = data["publish"]["privacy_status"]
     if privacy_status not in VALID_PRIVACY_STATUSES:
         raise ConfigError(
@@ -626,6 +639,10 @@ def load_config(path: str | Path) -> Config:
             fallback_model_id=merged["voiceover"]["fallback_model_id"] or None,
             use_delivery_tags=bool(merged["voiceover"]["use_delivery_tags"]),
             use_timestamps=bool(merged["voiceover"]["use_timestamps"]),
+            engine=str(merged["voiceover"]["engine"]),
+            local_python=_optional_path(merged["voiceover"]["local_python"]),
+            local_reference=_optional_path(merged["voiceover"]["local_reference"]),
+            local_timeout_sec=int(merged["voiceover"]["local_timeout_sec"]),
         ),
         logging=LoggingConfig(
             level=merged["logging"]["level"].upper(),

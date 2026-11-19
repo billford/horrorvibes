@@ -176,6 +176,14 @@ DEFAULTS: dict[str, Any] = {
         # length, so the next quote's narration never starts before this
         # one has actually finished.
         "narration_pad_sec": 1.0,
+        # elevenlabs (cloud) or chatterbox (local, on this Mac). Chatterbox clones the voice in
+        # local_reference (10-20 s of clean speech) and runs in its own venv (local_python), because it
+        # pins a different torch. Any clip it fails on falls back to ElevenLabs. See
+        # docs/reports/2026-11-19-local-vs-cloud-bakeoff.md.
+        "engine": "elevenlabs",
+        "local_python": "~/hv_local_venv/bin/python",
+        "local_reference": None,
+        "local_timeout_sec": 1200,
     },
     "motion": {
         # Ken Burns zoom/pan per quote, colour grade + film texture from the
