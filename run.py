@@ -34,6 +34,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--force", action="store_true", help="Ignore the cadence guard (min_hours_between_runs) and run now"
     )
     parser.add_argument(
+        "--privacy", choices=["private", "unlisted", "public"], default=None,
+        help="Override publish.privacy_status for this upload (e.g. unlisted for a review copy)",
+    )
+    parser.add_argument(
         "--format", choices=["story", "quotes"], default=None,
         help="Make this kind of video regardless of the weekday schedule (stories.days)",
     )
@@ -46,6 +50,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     config = load_config(args.config)
+    if args.privacy:
+        config = dataclasses.replace(
+            config, publish=dataclasses.replace(config.publish, privacy_status=args.privacy)
+        )
     if args.dry_run:
         no_upload = dataclasses.replace(config.publish, youtube_upload=False)
         config = dataclasses.replace(config, publish=no_upload)

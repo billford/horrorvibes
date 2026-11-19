@@ -204,12 +204,12 @@ DEFAULTS: dict[str, Any] = {
         # static frame-by-frame assembly, so a run never dies here.
         "enabled": True,
         "transition_sec": 0.8,
-        "zoom_amount": 0.10,
+        "zoom_amount": 0.18,
         # Keep the image alive under the captions: slow pan (fraction of the
         # zoom slack), heat-haze ripple (pixels) and candle flicker
         # (brightness). 0 turns each off.
         "drift": 0.8,
-        "ripple_px": 3.0,
+        "ripple_px": 4.5,
         "flicker": 0.025,
         # Backgrounds are upscaled this much before zoompan to avoid jitter.
         "upscale_factor": 1.5,

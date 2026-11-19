@@ -284,6 +284,15 @@ def _render_quote_media(
     return media
 
 
+def clear_drift(rng: random.Random, limit: float) -> float:
+    """A pan amount in [-limit, limit] that is never near zero.
+
+    A plain uniform pick sometimes landed near 0, leaving a clip with nothing but a slow zoom: on a
+    phone that reads as a frozen image (the 2026-11-18 upload).
+    """
+    return rng.choice((-1, 1)) * rng.uniform(0.5 * limit, limit)
+
+
 def _assemble(  # pylint: disable=too-many-arguments
     config: Config,
     plan: episode.EpisodePlan,
@@ -309,8 +318,8 @@ def _assemble(  # pylint: disable=too-many-arguments
                 ),
                 duration=quote_durations[i],
                 zoom_in=i % 2 == 0,
-                drift_x=rng.uniform(-1, 1),
-                drift_y=rng.uniform(-0.6, 0.6),
+                drift_x=clear_drift(rng, 1.0),
+                drift_y=clear_drift(rng, 0.6),
             )
             for i, m in enumerate(media)
         ]

@@ -947,3 +947,14 @@ def test_dry_runs_leave_the_cadence_state_alone(config, monkeypatch):
 
     assert main_unattended(config, chat_client=None, force=True, record=False) == 0
     assert not config.automation.state_file.exists()
+
+
+def test_clear_drift_is_never_near_zero():
+    import random  # pylint: disable=import-outside-toplevel
+
+    from horrorvibes.orchestrator import clear_drift  # pylint: disable=import-outside-toplevel
+
+    rng = random.Random(0)
+    values = [clear_drift(rng, 1.0) for _ in range(500)]
+    assert all(0.5 <= abs(v) <= 1.0 for v in values)
+    assert any(v < 0 for v in values) and any(v > 0 for v in values)
