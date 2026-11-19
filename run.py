@@ -27,7 +27,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--quotes", type=int, default=None, help="Override run.quote_count for this invocation"
     )
     parser.add_argument(
-        "--dry-run", action="store_true", help="Run the full pipeline but never upload to YouTube"
+        "--dry-run", action="store_true", help="Run the full pipeline but never upload to YouTube or update the run schedule"
     )
     parser.add_argument(
         "--force", action="store_true", help="Ignore the cadence guard (min_hours_between_runs) and run now"
@@ -60,6 +60,7 @@ def main(argv: list[str] | None = None) -> int:
         quote_count=args.quotes,
         elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY"),
         video_format=args.format,
+        record=not args.dry_run,
     )
 
 

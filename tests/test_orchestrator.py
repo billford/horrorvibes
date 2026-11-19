@@ -939,3 +939,11 @@ def test_story_pipeline_publishes_story_title_and_sources(config, monkeypatch):
     entry = json.loads(config.run.video_catalog_path.read_text(encoding="utf-8").splitlines()[-1])
     assert entry["episode_format"] == "story" and entry["topic"] == "The Octavius"
     assert "The Octavius" in config.stories.history_path.read_text(encoding="utf-8")
+
+
+def test_dry_runs_leave_the_cadence_state_alone(config, monkeypatch):
+    fake_result = SimpleNamespace(video_path="out.mp4", quote_count=2, youtube_video_id=None)
+    monkeypatch.setattr("horrorvibes.orchestrator.run_pipeline", lambda *a, **k: fake_result)
+
+    assert main_unattended(config, chat_client=None, force=True, record=False) == 0
+    assert not config.automation.state_file.exists()

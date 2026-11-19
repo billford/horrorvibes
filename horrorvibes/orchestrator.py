@@ -624,11 +624,15 @@ def main_unattended(
     quote_count: int | None = None,
     elevenlabs_api_key: str | None = None,
     video_format: str | None = None,
+    record: bool = True,
 ) -> int:
     """Entry point for the launchd job: cadence guard + failure notification.
 
     ``video_format`` forces "story" or "quotes"; by default stories run on stories.days. A story that
     can't be researched, fact-checked or pronounced correctly falls back to a quote Short.
+
+    ``record`` False (dry runs) leaves the cadence state alone, so a test run never makes the
+    scheduled run skip.
 
     Returns a process exit code (0 success/skip, 1 unrecoverable failure)
     instead of calling sys.exit() itself, so it stays testable.
@@ -659,6 +663,7 @@ def main_unattended(
         notify_failure(f"horrorvibes run failed: {exc}")
         return 1
 
-    record_run(config.automation.state_file, datetime.now())
+    if record:
+        record_run(config.automation.state_file, datetime.now())
     logger.info("Run complete: %s (%d quotes)", result.video_path, result.quote_count)
     return 0
