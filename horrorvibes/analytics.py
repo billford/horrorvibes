@@ -86,11 +86,16 @@ def fetch_uploads(youtube: Any) -> tuple[str, list[dict]]:
     return channel["id"], uploads
 
 
-def fetch_video_metrics(analytics: Any, start: date, end: date, page_size: int = 200) -> dict[str, dict]:
-    """Lifetime-to-date Analytics metrics per video, keyed by video id."""
+def fetch_video_metrics(
+    analytics: Any, video_ids: list[str], start: date, end: date, batch_size: int = 200
+) -> dict[str, dict]:
+    """Lifetime-to-date Analytics metrics per video, keyed by video id.
+
+    The API's per-video report stops at 200 rows and won't page further (startIndex 201 is
+    rejected), so the ids are requested in batches through a ``video==`` filter instead.
+    """
     metrics: dict[str, dict] = {}
-    start_index = 1
-    while True:
+    for batch in _chunks(video_ids, batch_size):
         report = (
             analytics.reports()
             .query(
@@ -99,20 +104,16 @@ def fetch_video_metrics(analytics: Any, start: date, end: date, page_size: int =
                 endDate=end.isoformat(),
                 metrics=ANALYTICS_METRICS,
                 dimensions="video",
-                sort="-views",
-                maxResults=page_size,
-                startIndex=start_index,
+                filters="video==" + ",".join(batch),
+                maxResults=batch_size,
             )
             .execute()
         )
         names = [header["name"] for header in report.get("columnHeaders", [])]
-        rows = report.get("rows") or []
-        for row in rows:
+        for row in report.get("rows") or []:
             record = dict(zip(names, row))
             metrics[record.pop("video")] = record
-        if len(rows) < page_size:
-            return metrics
-        start_index += page_size
+    return metrics
 
 
 def fetch_traffic_sources(analytics: Any, start: date, end: date) -> list[dict]:

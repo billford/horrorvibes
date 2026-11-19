@@ -42,7 +42,9 @@ def main() -> int:
 
     channel_id, uploads = analytics.fetch_uploads(youtube)
     today = date.today()
-    metrics = analytics.fetch_video_metrics(yt_analytics, FIRST_UPLOAD_YEAR_START, today)
+    metrics = analytics.fetch_video_metrics(
+        yt_analytics, [upload["video_id"] for upload in uploads], FIRST_UPLOAD_YEAR_START, today
+    )
     traffic = analytics.fetch_traffic_sources(yt_analytics, FIRST_UPLOAD_YEAR_START, today)
     catalog = analytics.load_catalog(config.run.video_catalog_path)
 

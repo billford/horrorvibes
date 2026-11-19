@@ -80,7 +80,7 @@ class _FakeAnalytics:
         return self._reports
 
 
-def test_fetch_video_metrics_pages_until_short_page():
+def test_fetch_video_metrics_batches_ids_through_a_filter():
     headers = [{"name": "video"}, {"name": "views"}]
     fake = _FakeAnalytics([
         {"columnHeaders": headers, "rows": [["v1", 5], ["v2", 4]]},
@@ -88,6 +88,7 @@ def test_fetch_video_metrics_pages_until_short_page():
     ])
     from datetime import date  # pylint: disable=import-outside-toplevel
 
-    result = analytics.fetch_video_metrics(fake, date(2025, 1, 1), date(2026, 1, 1), page_size=2)
+    ids = ["v1", "v2", "v3"]
+    result = analytics.fetch_video_metrics(fake, ids, date(2025, 1, 1), date(2026, 1, 1), batch_size=2)
     assert result == {"v1": {"views": 5}, "v2": {"views": 4}, "v3": {"views": 1}}
-    assert [call["startIndex"] for call in fake.reports().calls] == [1, 3]
+    assert [call["filters"] for call in fake.reports().calls] == ["video==v1,v2", "video==v3"]
