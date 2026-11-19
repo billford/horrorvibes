@@ -524,7 +524,12 @@ def _story_schedule(
 
 
 def _render_beat_media(config: Config, plan: episode.EpisodePlan, story: stories.Story) -> list[_QuoteMedia]:
-    """Image, caption layers and a flat still per beat. The caption's byline is the story's name."""
+    """Image, caption layers and a flat still per beat. The caption's byline is the story's name.
+
+    Story captions run up to ~30 words, so every pack gets a backing box: without one, the dimmed
+    not-yet-spoken words disappear into a busy image.
+    """
+    pack = dataclasses.replace(plan.pack, scrim_opacity=max(plan.pack.scrim_opacity, 150))
     image_backends = imagegen.default_backends(config)
     karaoke = config.motion is None or config.motion.caption_mode == "karaoke"
     layers_dir = config.run.frames_dir / "layers"
@@ -534,12 +539,13 @@ def _render_beat_media(config: Config, plan: episode.EpisodePlan, story: stories
             f"{story.topic.name}: {beat.narration}", i, config, config.run.images_dir,
             backends=image_backends, style=plan.pack.image_style,
             visual_scene=(
-                f"{beat.visual_scene} Set in {story.topic.era}, {story.topic.place}: every ship, building, "
-                "vehicle, light and object is accurate to that period, nothing modern."
+                f"{beat.visual_scene} Set in {story.topic.place} (story era: {story.topic.era}). Every "
+                "ship, building, vehicle, light and object is accurate to when this scene takes place; "
+                "nothing anachronistic."
             ),
         )
         layers = compositor.render_text_layers(
-            beat.narration, story.topic.name, plan.pack, config.compositor,
+            beat.narration, story.topic.name, pack, config.compositor,
             config.run.width, config.run.height, layers_dir, i, karaoke=karaoke,
         )
         frame = config.run.frames_dir / f"frame_{i + 1}.png"
