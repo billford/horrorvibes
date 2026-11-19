@@ -253,6 +253,34 @@ DEFAULTS: dict[str, Any] = {
              "themes": ["cosmic horror", "sci-fi horror", "body horror"]},
         ],
     },
+    # Story Shorts: one researched, fact-checked legend per video (docs/specs/story-shorts.md).
+    "stories": {
+        "enabled": False,
+        "model": None,  # null = quotes.model
+        "reasoning_effort": "medium",
+        "history_path": "./story_history.jsonl",
+        "audit_dir": "./stories",
+        # Saved upload titles (channel_analytics.json) the topic picker avoids repeating.
+        "channel_snapshot_path": "./channel_analytics.json",
+        # Relative weights for the topic category. Ships lead: the channel's most reliable topic.
+        "categories": {
+            "ghost ships, warships, shipwrecks and mysteries of the sea": 3.0,
+            "cursed or haunted objects": 1.5,
+            "unexplained lights in the sky or landscape": 1.5,
+            "cryptids and lake monsters": 1.2,
+            "haunted places and local legends": 1.0,
+            "one specific, documented incident at the heart of a conspiracy theory": 1.0,
+        },
+        "topic_candidates": 8,
+        "max_topic_attempts": 3,
+        "min_sources": 2,
+        "words_min": 90,
+        "words_max": 130,
+        "beats_min": 4,
+        "beats_max": 6,
+        # Narration voice for stories (the user's own clone, once made). null = voiceover.voice_id.
+        "voice_id": None,
+    },
     # Visual + sonic identity, rotated least-recently-used per run. Fonts
     # missing on the machine fall through to compositor.font_paths.
     "style_packs": [
@@ -576,6 +604,57 @@ class AutomationConfig:
 
 
 @dataclass(frozen=True)
+class StoriesConfig:  # pylint: disable=too-many-instance-attributes
+    """Story Shorts: topic choice, research, writing and claim checking."""
+
+    enabled: bool
+    model: str
+    reasoning_effort: str | None
+    history_path: Path
+    audit_dir: Path
+    channel_snapshot_path: Path
+    categories: dict[str, float]
+    topic_candidates: int
+    max_topic_attempts: int
+    min_sources: int
+    words_min: int
+    words_max: int
+    beats_min: int
+    beats_max: int
+    voice_id: str | None = None
+
+
+def _build_stories(data: dict[str, Any], quotes_model: str) -> StoriesConfig:
+    categories = {str(k): float(v) for k, v in (data["categories"] or {}).items()}
+    if not categories or any(w < 0 for w in categories.values()) or not any(categories.values()):
+        raise ConfigError("stories.categories must map category -> weight, with at least one weight > 0")
+    if not 1 <= int(data["words_min"]) <= int(data["words_max"]):
+        raise ConfigError("stories.words_min must be >= 1 and <= words_max")
+    if not 1 <= int(data["beats_min"]) <= int(data["beats_max"]):
+        raise ConfigError("stories.beats_min must be >= 1 and <= beats_max")
+    for key in ("topic_candidates", "max_topic_attempts", "min_sources"):
+        if int(data[key]) < 1:
+            raise ConfigError(f"stories.{key} must be at least 1")
+    return StoriesConfig(
+        enabled=bool(data["enabled"]),
+        model=str(data["model"] or quotes_model),
+        reasoning_effort=data["reasoning_effort"] or None,
+        history_path=Path(data["history_path"]),
+        audit_dir=Path(data["audit_dir"]),
+        channel_snapshot_path=Path(data["channel_snapshot_path"]),
+        categories=categories,
+        topic_candidates=int(data["topic_candidates"]),
+        max_topic_attempts=int(data["max_topic_attempts"]),
+        min_sources=int(data["min_sources"]),
+        words_min=int(data["words_min"]),
+        words_max=int(data["words_max"]),
+        beats_min=int(data["beats_min"]),
+        beats_max=int(data["beats_max"]),
+        voice_id=data["voice_id"] or None,
+    )
+
+
+@dataclass(frozen=True)
 class Config:
     """The fully merged, validated configuration for one run."""
 
@@ -590,6 +669,7 @@ class Config:
     automation: AutomationConfig
     motion: MotionConfig | None = None
     episodes: EpisodesConfig | None = None
+    stories: StoriesConfig | None = None
     style_packs: list[StylePack] = field(default_factory=list)
     raw: dict[str, Any] = field(repr=False, default_factory=dict)
 
@@ -895,6 +975,7 @@ def load_config(path: str | Path) -> Config:
         ),
         motion=_build_motion(merged["motion"]),
         episodes=_build_episodes(merged["episodes"]),
+        stories=_build_stories(merged["stories"], merged["quotes"]["model"]),
         style_packs=[_build_style_pack(pack) for pack in merged["style_packs"]],
         raw=merged,
     )

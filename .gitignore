@@ -28,3 +28,5 @@ smoke_test_music.mp3
 # macOS
 .DS_Store
 channel_analytics.json
+story_history.jsonl
+/stories/
