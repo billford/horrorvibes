@@ -265,7 +265,8 @@ _CATEGORY_TAGS = {
 def story_tags(story: Story, max_tags: int = 15) -> list[str]:
     """YouTube tags: the topic and place as tags, the category's tags, then generic ones."""
     tags = [re.sub(r"[^A-Za-z0-9]", "", story.topic.name.title())]
-    tags.append(re.sub(r"[^A-Za-z0-9]", "", story.topic.place.split(",")[0].title()))
+    # The broadest part of the place ("railroad tracks near Gurdon, Arkansas" -> "Arkansas").
+    tags.append(re.sub(r"[^A-Za-z0-9]", "", story.topic.place.split(",")[-1].title()))
     for key, extra in _CATEGORY_TAGS.items():
         if key in story.topic.category:
             tags += extra

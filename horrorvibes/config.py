@@ -276,9 +276,9 @@ DEFAULTS: dict[str, Any] = {
         "topic_candidates": 8,
         "max_topic_attempts": 3,
         "min_sources": 2,
-        # About 2.3 narrated words a second plus pauses between beats: 115 words is ~55 s.
-        "words_min": 85,
-        "words_max": 115,
+        # About 2.1 narrated words a second plus pauses between beats: 112 words came out at 60 s.
+        "words_min": 80,
+        "words_max": 105,
         "beats_min": 4,
         "beats_max": 6,
         # Longest beat: one beat's narration is one screen of captions.
