@@ -123,7 +123,7 @@ format such as *Folk Horror Night*, *Lines Spoken by Horror Villains*, *Chilling
 Horror*, *80s Horror*, *Classic Monster Movies*, *Horror TV* or *Cosmic & Sci-Fi Horror*. A format narrows
 the quote briefs (subgenres, decades, regions, film vs TV) or adds an instruction for the model, and it
 supplies the video's headline. Quote count varies between `episodes.quote_count_min` and
-`episodes.quote_count_max` (6-12 by default). Packs and formats are recorded in
+`episodes.quote_count_max` (4-5 by default, so each video stays a Short under a minute). Packs and formats are recorded in
 `episodes.history_path`, and in `video_catalog.jsonl` (`style_pack`, `episode_format`, `headline`), so
 you can see which looks perform best.
 

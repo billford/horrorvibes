@@ -214,15 +214,16 @@ motion:
   preset: medium
 
 # Each run is a mixed bag or (themed_share of the time) a themed episode,
-# with 6-12 quotes. When enabled this replaces run.quote_count; --quotes
+# with 4-5 quotes, keeping it a Short under a minute (channel analytics,
+# docs/reports/2026-11-19-channel-analytics.md: past 60 s views drop sharply). When enabled this replaces run.quote_count; --quotes
 # still overrides it. Formats and headlines default to the built-in list in
 # horrorvibes/config.py -- add an `episodes.formats` list here to replace it.
 episodes:
   enabled: true
   history_path: ./episode_history.jsonl
   themed_share: 0.4
-  quote_count_min: 6
-  quote_count_max: 12
+  quote_count_min: 4
+  quote_count_max: 5
 
 # Style packs (look, font, grade, transitions, music mood, voice) rotate
 # least-recently-used per run. Six ship built in (see DEFAULTS in

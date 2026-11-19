@@ -223,8 +223,8 @@ DEFAULTS: dict[str, Any] = {
         "history_path": "./episode_history.jsonl",
         # Chance a run is a themed episode rather than a mixed bag.
         "themed_share": 0.4,
-        "quote_count_min": 6,
-        "quote_count_max": 12,
+        "quote_count_min": 4,
+        "quote_count_max": 5,
         # {n} = number of quotes. Mixed episodes pick one at random.
         "mixed_headlines": [
             "{n} Bone-Chilling Horror Quotes",

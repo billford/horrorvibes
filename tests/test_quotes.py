@@ -413,3 +413,14 @@ def test_prompts_require_horror_genre_and_no_profanity(quotes_config):
     candidate = QuoteCandidate("Boo", "Film", 1999, "film", "", "high")
     verify = build_verify_request(quotes_config, [candidate]).to_kwargs()["instructions"]
     assert "not generally classed as horror" in verify
+
+
+def test_generate_quotes_opens_with_the_strongest_hook(tmp_path, quotes_config):
+    weak = {**_item("Q1", "Movie One", slot=1), "hook": 2}
+    strong = {**_item("Q2", "Movie Two", slot=2), "hook": 5}
+    unscored = _item("Q3", "Movie Three", slot=3)  # no hook -> treated as 3
+    client = FakeResponsesClient([_quotes_payload(weak, strong, unscored)])
+
+    result = generate_quotes(client, quotes_config, 3, tmp_path / "h.txt", rng=random.Random(0))
+
+    assert result == ['"Q2" - Movie Two (1980)', '"Q3" - Movie Three (1980)', '"Q1" - Movie One (1980)']

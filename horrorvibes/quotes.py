@@ -67,10 +67,11 @@ QUOTES_SCHEMA: dict[str, Any] = {
                     "confidence": {"type": "string", "enum": list(_CONFIDENCE_LEVELS)},
                     "visual_scene": {"type": "string"},
                     "delivery": {"type": "string", "enum": list(DELIVERY_TAGS)},
+                    "hook": {"type": "integer", "minimum": 1, "maximum": 5},
                 },
                 "required": [
                     "slot", "quote", "title", "year", "medium", "speaker", "confidence",
-                    "visual_scene", "delivery",
+                    "visual_scene", "delivery", "hook",
                 ],
                 "additionalProperties": False,
             },
@@ -129,7 +130,9 @@ _SYSTEM_PROMPT = (
     "only as silhouettes, distant figures or from behind. Never depict the actual actors' faces "
     "or likenesses, trademark monster or mask designs, or logos; no text, lettering, borders or "
     "picture frames; nothing graphic -- no gore, corpses, hanged figures or self-harm imagery.\n"
-    "- delivery: how a narrator should voice the line, matching how it is said in the scene."
+    "- delivery: how a narrator should voice the line, matching how it is said in the scene.\n"
+    "- hook: 1-5, how strongly this line alone would stop someone scrolling past a Short in the "
+    "first two seconds (5 = instantly gripping, chilling or recognisable)."
 )
 
 _VERIFY_PROMPT = (
@@ -176,6 +179,7 @@ class QuoteCandidate:
     confidence: str
     visual_scene: str = ""
     delivery: str = ""
+    hook: int = 3
 
     @property
     def display_text(self) -> str:
@@ -464,6 +468,7 @@ def parse_candidates(payload: dict[str, Any]) -> list[QuoteCandidate]:
                     confidence=str(item.get("confidence", "low")),
                     visual_scene=str(item.get("visual_scene", "")).strip(),
                     delivery=str(item.get("delivery", "")).strip(),
+                    hook=_clamp_hook(item.get("hook")),
                 )
             )
         except (KeyError, TypeError, ValueError):
@@ -617,4 +622,14 @@ def generate_quote_candidates(  # pylint: disable=too-many-arguments,too-many-lo
     if len(accepted) < count:
         logger.warning("Only got %d unique quotes out of %d requested", len(accepted), count)
 
-    return accepted
+    # Viewers decide in the first seconds (the channel's 100 s videos lost them at about 13 s), so
+    # the most gripping line opens the video. sorted() is stable, so ties keep their slot order.
+    return sorted(accepted, key=lambda candidate: -candidate.hook)
+
+
+def _clamp_hook(value: Any) -> int:
+    """The model's 1-5 hook score; anything missing or malformed counts as middling."""
+    try:
+        return min(5, max(1, int(value)))
+    except (TypeError, ValueError):
+        return 3
